@@ -1,6 +1,8 @@
+*~
 .sconsign.dblite
 config.log
 .sconf_temp
+.coverage
 *.o
 *.os
 *.so
@@ -14,3 +16,7 @@ doc/*.inc
 doc/doxygen.conf
 tests/.tests
 version.py
+bin/
+pytest_session.txt
+.cache/
+.pytest_cache/
