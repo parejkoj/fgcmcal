@@ -529,15 +529,20 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
         """
 
         sourceMapper = afwTable.SchemaMapper(fgcmStarCat.schema)
-        sourceMapper.addMinimalSchema(afwTable.SimpleTable.makeMinimalSchema())
+        minSchema = LoadIndexedReferenceObjectsTask.makeMinimalSchema(self.bands,
+                                                                      addFluxErr=True,
+                                                                      addCentroid=False,
+                                                                      addIsResolved=True,
+                                                                      coordErrDim=0)
+        sourceMapper.addMinimalSchema(minSchema)
         for band in self.bands:
-            sourceMapper.editOutputSchema().addField('%s_flux' % (band), type=np.float64)
-            sourceMapper.editOutputSchema().addField('%s_fluxErr' % (band), type=np.float64)
-            sourceMapper.editOutputSchema().addField('%s_nGood' % (band), type=np.float64)
+            sourceMapper.editOutputSchema().addField('%s_nGood' % (band), type=np.int32)
 
         formattedCat = afwTable.SimpleCatalog(sourceMapper.getOutputSchema())
         formattedCat.reserve(len(fgcmStarCat))
         formattedCat.extend(fgcmStarCat, mapper=sourceMapper)
+
+        # Note that we don't have to set `resolved` because the default is False
 
         for b, band in enumerate(self.bands):
             mag = fgcmStarCat['mag_std_noabs'][:, b] + offsets[b]
