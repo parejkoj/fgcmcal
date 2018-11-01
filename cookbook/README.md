@@ -2,7 +2,7 @@ FGCM Cookbook
 =============
 
 This is a simple cookbook/example for running FGCM on the HSC RC dataset on the
-lsst-dev server.  Please see [the FGCM README](../README.md) for installation
+lsst-dev server.  Please see [the FGCM README](../README.md) for general installation
 instructions.
 
 Requirements
@@ -26,8 +26,6 @@ The environment should be set up as follows:
 
 ```
 setup lsst_distrib
-setup -j -r /path/to/thirdparty/fgcm/.
-setup -j -r /path/to/lsst-dm/fgcmcal/.
 
 export RCRERUN=RC/w_2018_38/DM-15690
 export COOKBOOKRERUN=fgcm_cookbook_w_2018_38
