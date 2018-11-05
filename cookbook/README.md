@@ -91,7 +91,8 @@ and compute the atmosphere table once.
 ### Running `fgcmMakeLut.py`
 
 This is a very simple command-line task (assuming that your username is in the
-environment variable ${USER}).  E.g.,
+environment variable ${USER}).  This task should take around 3.5 hours on
+`lsst-dev01`.  The recommended command is:
 
 ```bash
 fgcmMakeLut.py /datasets/hsc/repo --rerun \
@@ -120,7 +121,8 @@ config](fgcmBuildStarsHsc.py) for HSC is available.
 
 ### Running `fgcmBuildStars.py`
 
-This is also a simple command-line task.  E.g.,
+This is also a simple command-line task.  This task will take around 2.5 hours
+on `lsst-dev01`:
 
 ```bash
 fgcmBuildStars.py /datasets/hsc/repo --rerun \
@@ -154,15 +156,16 @@ the bright observation selection.
 
 At the end of the first (and all subsequent) cycles a whole bunch of diagnostic
 plots are made in a subdirectory of the current directory where you invoked the
-FGCM fit.  The directory name and plot filenames are generated from the
-`outfileBase` and the `cycleNumber`.  Finally, a new config file is output
-for the next fit cycle that automatically increments the `cycleNumber` and
-turns off `freezeStdAtmosphere`.
+FGCM fit.  Therefore, you should run in a clean directory.  The directory name
+and plot filenames are generated from the `outfileBase` and the `cycleNumber`.
+Finally, a new config file is output for the next fit cycle that automatically
+increments the `cycleNumber` and turns off `freezeStdAtmosphere`.
 
 When running the output is logged to stdout, though it's useful to capture the
 output into a file with `tee`.  Note that if you want to start a new fit with
 different parameters with the same stars/LUT then you can simply specify a new
-output rerun and go from there.
+output rerun and go from there.  This stage should take less than 5 minutes to
+run on `lsst-dev01`.
 
 ```bash
 fgcmFitCycle.py /datasets/hsc/repo --rerun \
@@ -194,7 +197,7 @@ ${COOKBOOKRERUN}_cycle01.log
 After the user had concluded that the fit has converged to her satisfaction,
 one last run should be made with zero iterations and with `outputStandards =
 True`.  This will ensure the final products have consistently applied superstar
-flats and internal aperture corrections.
+flats and internal aperture corrections.  This should only take 2-3 minutes.
 
 ```bash
 fgcmFitCycle.py /datasets/hsc/repo --rerun private/${USER}/${COOKBOOKRERUN}/fit1 \
@@ -286,7 +289,7 @@ catalog.
 
 To build the output products you use the `fgcmOutputProducts.py` command-line
 task.  The only config variable is the cycle number that the user has deemed to
-be converged and should be output.
+be converged and should be output.  This should take around 5 minutes on `lsst-dev01`.
 
 ```bash
 fgcmOutputProducts.py /datasets/hsc/repo --rerun \
