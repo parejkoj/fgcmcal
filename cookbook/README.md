@@ -183,7 +183,10 @@ and `expGrayHighCut` (positive side) parameters.  You want to capture the core
 and reject outliers, but not too tight that you lose a lot of visits and can't
 constrain the fit.  You can also up the number of iterations per fit cycle.  In
 my experience, the fit does not improve if you go beyond ~50 iterations.  The
-best way to get the fit to improve is to remove non-photometric exposures.
+best way to get the fit to improve is to remove non-photometric exposures.  In
+the future, I will explore more automated metrics of convergence, but my
+assumption is that global calibration is run infrequently enough, and is
+important enough to require manual checks.
 
 ```bash
 fgcmFitCycle.py /datasets/hsc/repo --rerun private/${USER}/${COOKBOOKRERUN}/fit1 \
