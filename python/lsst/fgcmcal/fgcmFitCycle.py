@@ -813,8 +813,8 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                             starObs['ccd'][starIndices['obsindex']],
                             np.rad2deg(starObs['ra'][starIndices['obsindex']]),
                             np.rad2deg(starObs['dec'][starIndices['obsindex']]),
-                            starObs['mag'][starIndices['obsindex']],
-                            starObs['magerr'][starIndices['obsindex']],
+                            starObs['instMag'][starIndices['obsindex']],
+                            starObs['instMagErr'][starIndices['obsindex']],
                             fgcmExpInfo['FILTERNAME'][visitIndex],
                             starIds['fgcm_id'][:],
                             starIds['ra'][:],
@@ -1324,14 +1324,14 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         fgcmExpInfo['VISIT'][:] = visitCat['visit']
         fgcmExpInfo['MJD'][:] = visitCat['mjd']
         fgcmExpInfo['EXPTIME'][:] = visitCat['exptime']
-        fgcmExpInfo['DEEPFLAG'][:] = visitCat['deepflag']
+        fgcmExpInfo['DEEPFLAG'][:] = visitCat['deepFlag']
         fgcmExpInfo['TELHA'][:] = visitCat['telha']
         fgcmExpInfo['TELRA'][:] = visitCat['telra']
         fgcmExpInfo['TELDEC'][:] = visitCat['teldec']
         fgcmExpInfo['PMB'][:] = visitCat['pmb']
-        fgcmExpInfo['PSFSIGMA'][:] = visitCat['psfsigma']
-        fgcmExpInfo['DELTA_APER'][:] = visitCat['deltaaper']
-        fgcmExpInfo['SKYBACKGROUND'][:] = visitCat['skybackground']
+        fgcmExpInfo['PSFSIGMA'][:] = visitCat['psfSigma']
+        fgcmExpInfo['DELTA_APER'][:] = visitCat['deltaAper']
+        fgcmExpInfo['SKYBACKGROUND'][:] = visitCat['skyBackground']
         # Note that we have to go through asAstropy() to get a string
         #  array out of an afwTable
         fgcmExpInfo['FILTERNAME'][:] = visitCat.asAstropy()['filtername']
