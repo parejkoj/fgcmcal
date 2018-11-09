@@ -21,8 +21,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from __future__ import division, absolute_import, print_function
-
 import sys
 import traceback
 
@@ -251,8 +249,6 @@ class FgcmMakeLutRunner(pipeBase.ButlerInitializedTaskRunner):
         else:
             return [pipeBase.Struct(exitStatus=exitStatus)]
 
-    # turn off any multiprocessing
-
     def run(self, parsedCmd):
         """
         Run the task, with no multiprocessing
@@ -265,8 +261,6 @@ class FgcmMakeLutRunner(pipeBase.ButlerInitializedTaskRunner):
         resultList = []
 
         if self.precall(parsedCmd):
-            # profileName = parsedCmd.profile if hasattr(parsedCmd, "profile") else None
-            # log = parsedCmd.log
             targetList = self.getTargetList(parsedCmd)
             # make sure that we only get 1
             resultList = self(targetList[0])
@@ -313,7 +307,7 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
 
         Parameters
         ----------
-        butler:  lsst.daf.persistence.Butler
+        butler:  `lsst.daf.persistence.Butler`
 
         Returns
         -------
@@ -333,7 +327,7 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
 
         Parameters
         ----------
-        butler: lsst.daf.persistence.Butler
+        butler: `lsst.daf.persistence.Butler`
            (used for mapper information)
         """
 
@@ -386,8 +380,7 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
         self.log.info("Making the LUT maker object")
         self.fgcmLutMaker = fgcm.FgcmLUTMaker(lutConfig)
 
-        # generate the throughput dictionary.  Fun!
-        # do this internally here at first.  Later, break it into its own thing
+        # generate the throughput dictionary.
 
         # these will be in Angstroms
         # note that lambdaStep is currently in nm, because dumb.  convert to A
@@ -415,12 +408,6 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
         self.fgcmLutMaker.makeLUT()
 
         # and save the LUT
-        lutSchema = afwTable.Schema()
-
-        # new version, which gets around the afwTable row length limitation
-        #  each LUT will be saved in a different row
-        #  there is overhead of the arrays that we only need one copy, but this
-        #  is going to be insignificant overall
 
         # build the index values
         comma = ','
@@ -431,116 +418,11 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
         if self.config.atmosphereTableName is not None:
             atmosphereTableName = self.config.atmosphereTableName
 
-        lutSchema.addField('tablename', type=str, doc='Atmosphere table name',
-                           size=len(atmosphereTableName))
-        lutSchema.addField('elevation', type=float, doc="Telescope elevation used for LUT")
-        lutSchema.addField('filternames', type=str, doc='filterNames in LUT',
-                           size=len(filterNameString))
-        lutSchema.addField('stdfilternames', type=str, doc='Standard filterNames in LUT',
-                           size=len(stdFilterNameString))
-        lutSchema.addField('pmb', type='ArrayD', doc='Barometric Pressure',
-                           size=self.fgcmLutMaker.pmb.size)
-        lutSchema.addField('pmbfactor', type='ArrayD', doc='PMB scaling factor',
-                           size=self.fgcmLutMaker.pmb.size)
-        lutSchema.addField('pmbelevation', type=np.float64, doc='PMB Scaling at elevation')
-        lutSchema.addField('pwv', type='ArrayD', doc='Preciptable Water Vapor',
-                           size=self.fgcmLutMaker.pwv.size)
-        lutSchema.addField('o3', type='ArrayD', doc='Ozone',
-                           size=self.fgcmLutMaker.o3.size)
-        lutSchema.addField('tau', type='ArrayD', doc='Aerosol optical depth',
-                           size=self.fgcmLutMaker.tau.size)
-        lutSchema.addField('lambdanorm', type=np.float64, doc='AOD wavelength')
-        lutSchema.addField('alpha', type='ArrayD', doc='Aerosol alpha',
-                           size=self.fgcmLutMaker.alpha.size)
-        lutSchema.addField('zenith', type='ArrayD', doc='Zenith angle',
-                           size=self.fgcmLutMaker.zenith.size)
-        lutSchema.addField('nccd', type=np.int32, doc='Number of CCDs')
+        lutSchema = self._makeLutSchema(filterNameString, stdFilterNameString,
+                                        atmosphereTableName)
 
-        # and the standard values
-        lutSchema.addField('pmbstd', type=np.float64, doc='PMB Standard')
-        lutSchema.addField('pwvstd', type=np.float64, doc='PWV Standard')
-        lutSchema.addField('o3std', type=np.float64, doc='O3 Standard')
-        lutSchema.addField('taustd', type=np.float64, doc='Tau Standard')
-        lutSchema.addField('alphastd', type=np.float64, doc='Alpha Standard')
-        lutSchema.addField('zenithstd', type=np.float64, doc='Zenith angle Standard')
-        lutSchema.addField('lambdarange', type='ArrayD', doc='Wavelength range',
-                           size=2)
-        lutSchema.addField('lambdastep', type=np.float64, doc='Wavelength step')
-        lutSchema.addField('lambdastd', type='ArrayD', doc='Standard Wavelength',
-                           size=len(self.fgcmLutMaker.filterNames))
-        lutSchema.addField('lambdastdfilter', type='ArrayD', doc='Standard Wavelength (raw)',
-                           size=len(self.fgcmLutMaker.filterNames))
-        lutSchema.addField('i0std', type='ArrayD', doc='I0 Standard',
-                           size=len(self.fgcmLutMaker.filterNames))
-        lutSchema.addField('i1std', type='ArrayD', doc='I1 Standard',
-                           size=len(self.fgcmLutMaker.filterNames))
-        lutSchema.addField('i10std', type='ArrayD', doc='I10 Standard',
-                           size=len(self.fgcmLutMaker.filterNames))
-        lutSchema.addField('lambdab', type='ArrayD', doc='Wavelength for passband (no atm)',
-                           size=len(self.fgcmLutMaker.filterNames))
-        lutSchema.addField('atmlambda', type='ArrayD', doc='Atmosphere wavelengths (A)',
-                           size=self.fgcmLutMaker.atmLambda.size)
-        lutSchema.addField('atmstdtrans', type='ArrayD', doc='Standard Atmosphere Throughput',
-                           size=self.fgcmLutMaker.atmStdTrans.size)
-
-        # and the look-up-tables
-        lutSchema.addField('luttype', type=str, size=20, doc='Look-up table type')
-        lutSchema.addField('lut', type='ArrayF', doc='Look-up table for luttype',
-                           size=self.fgcmLutMaker.lut['I0'].size)
-
-        lutCat = afwTable.BaseCatalog(lutSchema)
-        lutCat.table.preallocate(14)
-
-        # first fill the first index
-        rec = lutCat.addNew()
-
-        rec['tablename'] = atmosphereTableName
-        rec['elevation'] = self.fgcmLutMaker.atmosphereTable.elevation
-        rec['filternames'] = filterNameString
-        rec['stdfilternames'] = stdFilterNameString
-        rec['pmb'][:] = self.fgcmLutMaker.pmb
-        rec['pmbfactor'][:] = self.fgcmLutMaker.pmbFactor
-        rec['pmbelevation'] = self.fgcmLutMaker.pmbElevation
-        rec['pwv'][:] = self.fgcmLutMaker.pwv
-        rec['o3'][:] = self.fgcmLutMaker.o3
-        rec['tau'][:] = self.fgcmLutMaker.tau
-        rec['lambdanorm'] = self.fgcmLutMaker.lambdaNorm
-        rec['alpha'][:] = self.fgcmLutMaker.alpha
-        rec['zenith'][:] = self.fgcmLutMaker.zenith
-        rec['nccd'] = self.fgcmLutMaker.nCCD
-
-        rec['pmbstd'] = self.fgcmLutMaker.pmbStd
-        rec['pwvstd'] = self.fgcmLutMaker.pwvStd
-        rec['o3std'] = self.fgcmLutMaker.o3Std
-        rec['taustd'] = self.fgcmLutMaker.tauStd
-        rec['alphastd'] = self.fgcmLutMaker.alphaStd
-        rec['zenithstd'] = self.fgcmLutMaker.zenithStd
-        rec['lambdarange'][:] = self.fgcmLutMaker.lambdaRange
-        rec['lambdastep'] = self.fgcmLutMaker.lambdaStep
-        rec['lambdastd'][:] = self.fgcmLutMaker.lambdaStd
-        rec['lambdastdfilter'][:] = self.fgcmLutMaker.lambdaStdFilter
-        rec['i0std'][:] = self.fgcmLutMaker.I0Std
-        rec['i1std'][:] = self.fgcmLutMaker.I1Std
-        rec['i10std'][:] = self.fgcmLutMaker.I10Std
-        rec['lambdab'][:] = self.fgcmLutMaker.lambdaB
-        rec['atmlambda'][:] = self.fgcmLutMaker.atmLambda
-        rec['atmstdtrans'][:] = self.fgcmLutMaker.atmStdTrans
-
-        rec['luttype'] = 'I0'
-        rec['lut'][:] = self.fgcmLutMaker.lut['I0'].flatten()
-
-        # and add the rest
-        rec = lutCat.addNew()
-        rec['luttype'] = 'I1'
-        rec['lut'][:] = self.fgcmLutMaker.lut['I1'].flatten()
-
-        derivTypes = ['D_PMB', 'D_PWV', 'D_O3', 'D_LNTAU', 'D_ALPHA', 'D_SECZENITH',
-                      'D_PMB_I1', 'D_PWV_I1', 'D_O3_I1', 'D_LNTAU_I1', 'D_ALPHA_I1', 'D_SECZENITH_I1']
-        for derivType in derivTypes:
-            rec = lutCat.addNew()
-            rec['luttype'] = derivType
-            rec['lut'][:] = self.fgcmLutMaker.lutDeriv[derivType].flatten()
-
+        lutCat = self._makeLutCat(lutSchema, filterNameString,
+                                  stdFilterNameString, atmosphereTableName)
         butler.put(lutCat, 'fgcmLookUpTable')
 
         # and we're done
@@ -552,10 +434,6 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
         ----------
         butler: `lsst.dat.persistence.butler.Butler`
            A butler with the camera and transmission info
-
-        Returns
-        -------
-        None
         """
 
         camera = butler.get('camera')
@@ -615,3 +493,164 @@ class FgcmMakeLutTask(pipeBase.CmdLineTask):
                                                                      wavelengths=throughputLambda)
 
         return throughput
+
+    def _makeLutSchema(self, filterNameString, stdFilterNameString,
+                       atmosphereTableName):
+        """
+        Make the LUT schema
+
+        Parameters
+        ----------
+        filterNameString: `str`
+           Combined string of all the filterNames
+        stdFilterNameString: `str`
+           Combined string of all the standard filterNames
+        atmosphereTableName: `str`
+           Name of the atmosphere table used to generate LUT
+
+        Returns
+        -------
+        lutSchema: `afwTable.schema`
+        """
+
+        lutSchema = afwTable.Schema()
+
+        lutSchema.addField('tablename', type=str, doc='Atmosphere table name',
+                           size=len(atmosphereTableName))
+        lutSchema.addField('elevation', type=float, doc="Telescope elevation used for LUT")
+        lutSchema.addField('filterNames', type=str, doc='filterNames in LUT',
+                           size=len(filterNameString))
+        lutSchema.addField('stdFilterNames', type=str, doc='Standard filterNames in LUT',
+                           size=len(stdFilterNameString))
+        lutSchema.addField('pmb', type='ArrayD', doc='Barometric Pressure',
+                           size=self.fgcmLutMaker.pmb.size)
+        lutSchema.addField('pmbFactor', type='ArrayD', doc='PMB scaling factor',
+                           size=self.fgcmLutMaker.pmb.size)
+        lutSchema.addField('pmbElevation', type=np.float64, doc='PMB Scaling at elevation')
+        lutSchema.addField('pwv', type='ArrayD', doc='Preciptable Water Vapor',
+                           size=self.fgcmLutMaker.pwv.size)
+        lutSchema.addField('o3', type='ArrayD', doc='Ozone',
+                           size=self.fgcmLutMaker.o3.size)
+        lutSchema.addField('tau', type='ArrayD', doc='Aerosol optical depth',
+                           size=self.fgcmLutMaker.tau.size)
+        lutSchema.addField('lambdaNorm', type=np.float64, doc='AOD wavelength')
+        lutSchema.addField('alpha', type='ArrayD', doc='Aerosol alpha',
+                           size=self.fgcmLutMaker.alpha.size)
+        lutSchema.addField('zenith', type='ArrayD', doc='Zenith angle',
+                           size=self.fgcmLutMaker.zenith.size)
+        lutSchema.addField('nCcd', type=np.int32, doc='Number of CCDs')
+
+        # and the standard values
+        lutSchema.addField('pmbStd', type=np.float64, doc='PMB Standard')
+        lutSchema.addField('pwvStd', type=np.float64, doc='PWV Standard')
+        lutSchema.addField('o3Std', type=np.float64, doc='O3 Standard')
+        lutSchema.addField('tauStd', type=np.float64, doc='Tau Standard')
+        lutSchema.addField('alphaStd', type=np.float64, doc='Alpha Standard')
+        lutSchema.addField('zenithStd', type=np.float64, doc='Zenith angle Standard')
+        lutSchema.addField('lambdaRange', type='ArrayD', doc='Wavelength range',
+                           size=2)
+        lutSchema.addField('lambdaStep', type=np.float64, doc='Wavelength step')
+        lutSchema.addField('lambdaStd', type='ArrayD', doc='Standard Wavelength',
+                           size=len(self.fgcmLutMaker.filterNames))
+        lutSchema.addField('lambdaStdFilter', type='ArrayD', doc='Standard Wavelength (raw)',
+                           size=len(self.fgcmLutMaker.filterNames))
+        lutSchema.addField('i0Std', type='ArrayD', doc='I0 Standard',
+                           size=len(self.fgcmLutMaker.filterNames))
+        lutSchema.addField('i1Std', type='ArrayD', doc='I1 Standard',
+                           size=len(self.fgcmLutMaker.filterNames))
+        lutSchema.addField('i10Std', type='ArrayD', doc='I10 Standard',
+                           size=len(self.fgcmLutMaker.filterNames))
+        lutSchema.addField('lambdaB', type='ArrayD', doc='Wavelength for passband (no atm)',
+                           size=len(self.fgcmLutMaker.filterNames))
+        lutSchema.addField('atmLambda', type='ArrayD', doc='Atmosphere wavelengths (A)',
+                           size=self.fgcmLutMaker.atmLambda.size)
+        lutSchema.addField('atmStdTrans', type='ArrayD', doc='Standard Atmosphere Throughput',
+                           size=self.fgcmLutMaker.atmStdTrans.size)
+
+        # and the look-up-tables
+        lutSchema.addField('luttype', type=str, size=20, doc='Look-up table type')
+        lutSchema.addField('lut', type='ArrayF', doc='Look-up table for luttype',
+                           size=self.fgcmLutMaker.lut['I0'].size)
+
+        return lutSchema
+
+    def _makeLutCat(self, lutSchema, filterNameString, stdFilterNameString,
+                    atmosphereTableName):
+        """
+        Make the LUT schema
+
+        Parameters
+        ----------
+        lutSchema: `afwTable.schema`
+           Lut catalog schema
+        filterNameString: `str`
+           Combined string of all the filterNames
+        stdFilterNameString: `str`
+           Combined string of all the standard filterNames
+        atmosphereTableName: `str`
+           Name of the atmosphere table used to generate LUT
+
+        Returns
+        -------
+        lutCat: `afwTable.BaseCatalog`
+           Lut catalog for persistence
+        """
+
+        # The somewhat strange format is to make sure that
+        # the rows of the afwTable do not get too large
+        # (see DM-11419)
+
+        lutCat = afwTable.BaseCatalog(lutSchema)
+        lutCat.table.preallocate(14)
+
+        # first fill the first index
+        rec = lutCat.addNew()
+
+        rec['tablename'] = atmosphereTableName
+        rec['elevation'] = self.fgcmLutMaker.atmosphereTable.elevation
+        rec['filterNames'] = filterNameString
+        rec['stdFilterNames'] = stdFilterNameString
+        rec['pmb'][:] = self.fgcmLutMaker.pmb
+        rec['pmbFactor'][:] = self.fgcmLutMaker.pmbFactor
+        rec['pmbElevation'] = self.fgcmLutMaker.pmbElevation
+        rec['pwv'][:] = self.fgcmLutMaker.pwv
+        rec['o3'][:] = self.fgcmLutMaker.o3
+        rec['tau'][:] = self.fgcmLutMaker.tau
+        rec['lambdaNorm'] = self.fgcmLutMaker.lambdaNorm
+        rec['alpha'][:] = self.fgcmLutMaker.alpha
+        rec['zenith'][:] = self.fgcmLutMaker.zenith
+        rec['nCcd'] = self.fgcmLutMaker.nCCD
+
+        rec['pmbStd'] = self.fgcmLutMaker.pmbStd
+        rec['pwvStd'] = self.fgcmLutMaker.pwvStd
+        rec['o3Std'] = self.fgcmLutMaker.o3Std
+        rec['tauStd'] = self.fgcmLutMaker.tauStd
+        rec['alphaStd'] = self.fgcmLutMaker.alphaStd
+        rec['zenithStd'] = self.fgcmLutMaker.zenithStd
+        rec['lambdaRange'][:] = self.fgcmLutMaker.lambdaRange
+        rec['lambdaStep'] = self.fgcmLutMaker.lambdaStep
+        rec['lambdaStd'][:] = self.fgcmLutMaker.lambdaStd
+        rec['lambdaStdFilter'][:] = self.fgcmLutMaker.lambdaStdFilter
+        rec['i0Std'][:] = self.fgcmLutMaker.I0Std
+        rec['i1Std'][:] = self.fgcmLutMaker.I1Std
+        rec['i10Std'][:] = self.fgcmLutMaker.I10Std
+        rec['lambdaB'][:] = self.fgcmLutMaker.lambdaB
+        rec['atmLambda'][:] = self.fgcmLutMaker.atmLambda
+        rec['atmStdTrans'][:] = self.fgcmLutMaker.atmStdTrans
+
+        rec['luttype'] = 'I0'
+        rec['lut'][:] = self.fgcmLutMaker.lut['I0'].flatten()
+
+        # and add the rest
+        rec = lutCat.addNew()
+        rec['luttype'] = 'I1'
+        rec['lut'][:] = self.fgcmLutMaker.lut['I1'].flatten()
+
+        derivTypes = ['D_PMB', 'D_PWV', 'D_O3', 'D_LNTAU', 'D_ALPHA', 'D_SECZENITH',
+                      'D_PMB_I1', 'D_PWV_I1', 'D_O3_I1', 'D_LNTAU_I1', 'D_ALPHA_I1', 'D_SECZENITH_I1']
+        for derivType in derivTypes:
+            rec = lutCat.addNew()
+            rec['luttype'] = derivType
+            rec['lut'][:] = self.fgcmLutMaker.lutDeriv[derivType].flatten()
+
+        return lutCat

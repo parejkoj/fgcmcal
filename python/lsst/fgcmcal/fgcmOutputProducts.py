@@ -21,8 +21,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from __future__ import division, absolute_import, print_function
-
 import sys
 import traceback
 import copy
@@ -433,7 +431,7 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
                 sourceCat.reserve(len(i1a))
                 sourceCat.extend(stars[selected], mapper=sourceMapper)
                 sourceCat['flux'] = afwImage.fluxFromABMag(stars['mag_std_noabs'][selected, b])
-                sourceCat['fluxErr'] = afwImage.fluxErrFromABMagErr(stars['magerr_std'][selected, b],
+                sourceCat['fluxErr'] = afwImage.fluxErrFromABMagErr(stars['magErr_std'][selected, b],
                                                                     stars['mag_std_noabs'][selected, b])
 
                 # Make sure we only use stars that have valid measurements
@@ -563,7 +561,7 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
         for b, band in enumerate(self.bands):
             mag = fgcmStarCat['mag_std_noabs'][:, b] + offsets[b]
             flux = afwImage.fluxFromABMag(mag)
-            fluxErr = afwImage.fluxErrFromABMagErr(fgcmStarCat['magerr_std'][:, b], mag)
+            fluxErr = afwImage.fluxErrFromABMagErr(fgcmStarCat['magErr_std'][:, b], mag)
             formattedCat['%s_flux' % (band)][:] = flux
             formattedCat['%s_fluxErr' % (band)][:] = fluxErr
             formattedCat['%s_nGood' % (band)][:] = fgcmStarCat['ngood'][:, b]
@@ -585,7 +583,7 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
         visitCat = butler.get('fgcmVisitCatalog')
 
         # Only output those that we have a calibration
-        selected = (zptCat['fgcmflag'] < 16)
+        selected = (zptCat['fgcmFlag'] < 16)
 
         # Get the mapping from filtername to dataId filter name
         filterMapping = {}
@@ -627,11 +625,11 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
             if self.superStarSubCcd:
                 # Spatially varying zeropoint
                 bbox = lsst.geom.Box2I(lsst.geom.Point2I(0.0, 0.0),
-                                       lsst.geom.Point2I(*rec['fgcmfzptchebxymax']))
+                                       lsst.geom.Point2I(*rec['fgcmfZptChebXyMax']))
 
                 # Take the zeropoint, apply the absolute relative calibration offset,
                 # and whatever flat-field scaling was applied
-                pars[:, :] = (rec['fgcmfzptcheb'].reshape(orderPlus1, orderPlus1) *
+                pars[:, :] = (rec['fgcmfZptCheb'].reshape(orderPlus1, orderPlus1) *
                               10.**(offsetMapping[rec['filtername']] / (-2.5)) *
                               scalingMapping[rec['visit']][ccdMapping[rec['ccd']]])
 
@@ -640,7 +638,7 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
                 field = afwMath.ChebyshevBoundedField(bbox, pars)
                 calibMean = field.mean()
 
-                calibErr = (np.log(10.) / 2.5) * calibMean * rec['fgcmzpterr']
+                calibErr = (np.log(10.) / 2.5) * calibMean * rec['fgcmZptErr']
 
                 photoCalib = afwImage.PhotoCalib(field, calibErr)
 
@@ -650,10 +648,10 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
                 # Take the zeropoint, apply the absolute relative calibration offset,
                 # and whatever flat-field scaling was applied
 
-                calibMean = (10.**(rec['fgcmzpt'] / (-2.5)) *
+                calibMean = (10.**(rec['fgcmZpt'] / (-2.5)) *
                              10.**(offsetMapping[rec['filtername']] / (-2.5)) *
                              scalingMapping[rec['visit']][ccdMapping[rec['ccd']]])
-                calibErr = (np.log(10.) / 2.5) * calibMean * rec['fgcmzpterr']
+                calibErr = (np.log(10.) / 2.5) * calibMean * rec['fgcmZptErr']
                 photoCalib = afwImage.PhotoCalib(calibMean, calibErr)
 
             butler.put(photoCalib, 'jointcal_photoCalib',
@@ -681,7 +679,7 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
 
         atmosphereTableName = lutCat[0]['tablename']
         elevation = lutCat[0]['elevation']
-        atmLambda = lutCat[0]['atmlambda']
+        atmLambda = lutCat[0]['atmLambda']
         lutCat = None
 
         # Make the atmosphere table if possible
@@ -698,13 +696,13 @@ class FgcmOutputProductsTask(pipeBase.CmdLineTask):
                 lambdaRange = np.array([atmLambda[0], atmLambda[-1]]) / 10.
                 lambdaStep = (atmLambda[1] - atmLambda[0]) / 10.
             except (ValueError, IOError):
-                raise RuntimeError("FGCM look-up-table generated without modtran, "
+                raise RuntimeError("FGCM look-up-table generated with modtran, "
                                    "but modtran not configured to run.")
 
         # Next, we need to grab the atmosphere parameters
         atmCat = butler.get('fgcmAtmosphereParameters', fgcmcycle=self.config.cycleNumber)
 
-        zenith = np.degrees(np.arccos(1. / atmCat['seczenith']))
+        zenith = np.degrees(np.arccos(1. / atmCat['secZenith']))
 
         for i, visit in enumerate(atmCat['visit']):
             if atmTable is not None:

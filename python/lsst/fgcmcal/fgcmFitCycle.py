@@ -21,12 +21,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from __future__ import division, absolute_import, print_function
-from past.builtins import xrange
-
-import matplotlib
-matplotlib.use("Agg")  # noqa
-
 import sys
 import traceback
 
@@ -271,7 +265,9 @@ class FgcmFitCycleConfig(pexConfig.Config):
     varNSig = pexConfig.Field(
         doc="Number of sigma to be tested as a variable",
         dtype=float,
-        default=4.0,
+        # Default recommendation in FGCM is to set this very large to
+        # turn off the variable detection
+        default=100.0,
     )
     varMinBand = pexConfig.Field(
         doc="Minimum number of bands with variability to be flagged as variable",
@@ -332,14 +328,12 @@ class FgcmFitCycleRunner(pipeBase.ButlerInitializedTaskRunner):
 
     # This overrides the pipe_base config saving which would fail because it
     # requires the %(fgcmcycle)d dataId key.
-    # def precall(self, parsedCmd):
-    #    return True
 
     def __call__(self, butler):
         """
         Parameters
         ----------
-        butler: lsst.daf.persistence.Butler
+        butler: `lsst.daf.persistence.Butler`
 
         Returns
         -------
@@ -370,8 +364,6 @@ class FgcmFitCycleRunner(pipeBase.ButlerInitializedTaskRunner):
         else:
             return [pipeBase.Struct(exitStatus=exitStatus)]
 
-    # turn off any multiprocessing
-
     def run(self, parsedCmd):
         """
         Run the task, with no multiprocessing
@@ -384,8 +376,6 @@ class FgcmFitCycleRunner(pipeBase.ButlerInitializedTaskRunner):
         resultList = []
 
         if self.precall(parsedCmd):
-            # profileName = parsedCmd.profile if hasattr(parsedCmd, "profile") else None
-            # log = parsedCmd.log
             targetList = self.getTargetList(parsedCmd)
             # make sure that we only get 1
             resultList = self(targetList[0])
@@ -408,7 +398,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
         Parameters
         ----------
-        butler : lsst.daf.persistence.Butler
+        butler : `lsst.daf.persistence.Butler`
         """
 
         pipeBase.CmdLineTask.__init__(self, **kwargs)
@@ -432,7 +422,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
         Parameters
         ----------
-        butler:  lsst.daf.persistence.Butler
+        butler:  `lsst.daf.persistence.Butler`
 
         Returns
         -------
@@ -457,7 +447,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
             A boolean flag that controls what happens if a config already has been saved:
             - `True`: overwrite or rename the existing config, depending on ``doBackup``.
             - `False`: raise `TaskError` if this config does not match the existing config.
-        doBackup : bool, optional
+        doBackup : `bool`, optional
             Set to `True` to backup the config files if clobbering.
         """
         configName = self._getConfigName()
@@ -490,146 +480,35 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
         Parameters
         ----------
-        butler: lsst.daf.persistence.Butler
+        butler: `lsst.daf.persistence.Butler`
            (used for mapper information)
 
         """
 
-        # FIXME:
-        #   more sensible configuration options related to bands/fitbands
-        #   check that array lengths are matched
-
-        # FIXME:
-        #   Need to be able to turn off plots if desired
-
-        #  TBD:
-        #   updating configuration at the end for next cycle?
-        #   where to output logging and figures?
-
         if not butler.datasetExists('fgcmVisitCatalog'):
-            raise ValueError("Could not find fgcmVisitCatalog in repo!")
+            raise RuntimeError("Could not find fgcmVisitCatalog in repo!")
         if not butler.datasetExists('fgcmStarObservations'):
-            raise ValueError("Could not find fgcmStarObservations in repo!")
+            raise RuntimeError("Could not find fgcmStarObservations in repo!")
         if not butler.datasetExists('fgcmStarIds'):
-            raise ValueError("Could not find fgcmStarIds in repo!")
+            raise RuntimeError("Could not find fgcmStarIds in repo!")
         if not butler.datasetExists('fgcmStarIndices'):
-            raise ValueError("Could not find fgcmStarIndices in repo!")
+            raise RuntimeError("Could not find fgcmStarIndices in repo!")
         if not butler.datasetExists('fgcmLookUpTable'):
-            raise ValueError("Could not find fgcmLookUpTable in repo!")
+            raise RuntimeError("Could not find fgcmLookUpTable in repo!")
 
         # Need additional datasets if we are not the initial cycle
         if (self.config.cycleNumber > 0):
             if not butler.datasetExists('fgcmFitParameters',
                                         fgcmcycle=self.config.cycleNumber-1):
-                raise ValueError("Could not find fgcmFitParameters for previous cycle (%d) in repo!" %
-                                 (self.config.cycleNumber-1))
+                raise RuntimeError("Could not find fgcmFitParameters for previous cycle (%d) in repo!" %
+                                   (self.config.cycleNumber-1))
             if not butler.datasetExists('fgcmFlaggedStars',
                                         fgcmcycle=self.config.cycleNumber-1):
-                raise ValueError("Could not find fgcmFlaggedStars for previous cycle (%d) in repo!" %
-                                 (self.config.cycleNumber-1))
-
-        # FIXME:
-        #  check config variables for valid ranges
-
-        fitFlag = np.array(self.config.fitFlag, dtype=np.bool)
-        requiredFlag = np.array(self.config.requiredFlag, dtype=np.bool)
-
-        fitBands = [b for i, b in enumerate(self.config.bands) if fitFlag[i]]
-        notFitBands = [b for i, b in enumerate(self.config.bands) if not fitFlag[i]]
-        requiredBands = [b for i, b in enumerate(self.config.bands) if requiredFlag[i]]
+                raise RuntimeError("Could not find fgcmFlaggedStars for previous cycle (%d) in repo!" %
+                                   (self.config.cycleNumber-1))
 
         camera = butler.get('camera')
-
-        # process the starColorCuts
-        starColorCutList = []
-        for ccut in self.config.starColorCuts:
-            parts = ccut.split(',')
-            starColorCutList.append([parts[0], parts[1], float(parts[2]), float(parts[3])])
-
-        if self.config.maxIter == 0:
-            resetParameters = False
-        else:
-            resetParameters = True
-
-        # Mirror area in cm**2
-        mirrorArea = np.pi*(camera.telescopeDiameter*100./2.)**2.
-
-        # create a configuration dictionary for fgcmFitCycle
-        configDict = {'outfileBase': self.config.outfileBase,
-                      'logger': self.log,
-                      'exposureFile': None,
-                      'obsFile': None,
-                      'indexFile': None,
-                      'lutFile': None,
-                      'mirrorArea': mirrorArea,
-                      'cameraGain': self.config.cameraGain,
-                      'ccdStartIndex': camera[0].getId(),
-                      'expField': 'VISIT',
-                      'ccdField': 'CCD',
-                      'seeingField': 'DELTA_APER',
-                      'fwhmField': 'PSFSIGMA',
-                      'skyBrightnessField': 'SKYBACKGROUND',
-                      'deepFlag': 'DEEPFLAG',  # unused
-                      'bands': list(self.config.bands),
-                      'fitBands': list(fitBands),
-                      'notFitBands': list(notFitBands),
-                      'requiredBands': list(requiredBands),
-                      'filterToBand': dict(self.config.filterToBand),
-                      'logLevel': 'INFO',  # FIXME
-                      'nCore': self.config.nCore,
-                      'nStarPerRun': self.config.nStarPerRun,
-                      'nExpPerRun': self.config.nExpPerRun,
-                      'reserveFraction': self.config.reserveFraction,
-                      'freezeStdAtmosphere': self.config.freezeStdAtmosphere,
-                      'precomputeSuperStarInitialCycle': self.config.precomputeSuperStarInitialCycle,
-                      'superStarSubCCD': self.config.superStarSubCcd,
-                      'superStarSubCCDChebyshevOrder': self.config.superStarSubCcdChebyshevOrder,
-                      'superStarSigmaClip': self.config.superStarSigmaClip,
-                      'cycleNumber': self.config.cycleNumber,
-                      'maxIter': self.config.maxIter,
-                      'UTBoundary': self.config.utBoundary,
-                      'washMJDs': self.config.washMjds,
-                      'epochMJDs': self.config.epochMjds,
-                      'minObsPerBand': self.config.minObsPerBand,
-                      'latitude': self.config.latitude,
-                      'brightObsGrayMax': self.config.brightObsGrayMax,
-                      'minStarPerCCD': self.config.minStarPerCcd,
-                      'minCCDPerExp': self.config.minCcdPerExp,
-                      'maxCCDGrayErr': self.config.maxCcdGrayErr,
-                      'minStarPerExp': self.config.minStarPerExp,
-                      'minExpPerNight': self.config.minExpPerNight,
-                      'expGrayInitialCut': self.config.expGrayInitialCut,
-                      'expGrayPhotometricCut': np.array(self.config.expGrayPhotometricCut),
-                      'expGrayHighCut': np.array(self.config.expGrayHighCut),
-                      'expGrayRecoverCut': self.config.expGrayRecoverCut,
-                      'expVarGrayPhotometricCut': self.config.expVarGrayPhotometricCut,
-                      'expGrayErrRecoverCut': self.config.expGrayErrRecoverCut,
-                      'illegalValue': self.config.illegalValue,
-                      'starColorCuts': starColorCutList,
-                      'aperCorrFitNBins': self.config.aperCorrFitNBins,
-                      'sedFudgeFactors': np.array(self.config.sedFudgeFactors),
-                      'colorSplitIndices': np.array(self.config.colorSplitIndices),
-                      'sigFgcmMaxErr': self.config.sigFgcmMaxErr,
-                      'sigFgcmMaxEGray': self.config.sigFgcmMaxEGray,
-                      'ccdGrayMaxStarErr': self.config.ccdGrayMaxStarErr,
-                      'approxThroughput': self.config.approxThroughput,
-                      'sigma0Cal': self.config.sigma0Cal,
-                      'sigma0Phot': self.config.sigma0Phot,
-                      'mapLongitudeRef': self.config.mapLongitudeRef,
-                      'mapNSide': self.config.mapNSide,
-                      'varNSig': self.config.varNSig,
-                      'varMinBand': self.config.varMinBand,
-                      'useRetrievedPWV': False,
-                      'useNightlyRetrievedPWV': False,
-                      'pwvRetrievalSmoothBlock': 25,
-                      'useRetrievedTauInit': False,
-                      'tauRetrievalMinCCDPerNight': 500,
-                      'modelMagErrors': self.config.modelMagErrors,
-                      'printOnly': False,
-                      'outputStars': False,
-                      'clobber': True,
-                      'useSedLUT': False,
-                      'resetParameters': resetParameters}
+        configDict = self._makeConfigDict(camera)
 
         fgcmLut, lutIndexVals, lutStd = self._loadFgcmLut(butler,
                                                           filterToBand=self.config.filterToBand)
@@ -656,129 +535,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                                                              fgcmLut,
                                                              fgcmExpInfo)
         else:
-            # note that we already checked that this is available
-            parCat = butler.get('fgcmFitParameters', fgcmcycle=self.config.cycleNumber-1)
-
-            parLutFilterNames = np.array(parCat[0]['lutfilternames'].split(','))
-            parFitBands = np.array(parCat[0]['fitbands'].split(','))
-            parNotFitBands = np.array(parCat[0]['notfitbands'].split(','))
-
-            # FIXME: check that these are the same as in the config, to be sure
-
-            inParInfo = np.zeros(1, dtype=[('NCCD', 'i4'),
-                                           ('LUTFILTERNAMES', parLutFilterNames.dtype.str,
-                                            parLutFilterNames.size),
-                                           ('FITBANDS', parFitBands.dtype.str, parFitBands.size),
-                                           ('NOTFITBANDS', parNotFitBands.dtype.str, parNotFitBands.size),
-                                           ('LNTAUUNIT', 'f8'),
-                                           ('LNTAUSLOPEUNIT', 'f8'),
-                                           ('ALPHAUNIT', 'f8'),
-                                           ('PWVUNIT', 'f8'),
-                                           ('PWVPERSLOPEUNIT', 'f8'),
-                                           ('PWVGLOBALUNIT', 'f8'),
-                                           ('O3UNIT', 'f8'),
-                                           ('QESYSUNIT', 'f8'),
-                                           ('QESYSSLOPEUNIT', 'f8'),
-
-                                           ('HASEXTERNALPWV', 'i2'),
-                                           ('HASEXTERNALTAU', 'i2')])
-            inParInfo['NCCD'] = parCat['nccd']
-            inParInfo['LUTFILTERNAMES'][:] = parLutFilterNames
-            inParInfo['FITBANDS'][:] = parFitBands
-            inParInfo['NOTFITBANDS'][:] = parNotFitBands
-            inParInfo['LNTAUUNIT'] = parCat['lntauunit']
-            inParInfo['LNTAUSLOPEUNIT'] = parCat['lntauslopeunit']
-            inParInfo['ALPHAUNIT'] = parCat['alphaunit']
-            inParInfo['PWVUNIT'] = parCat['pwvunit']
-            inParInfo['PWVPERSLOPEUNIT'] = parCat['pwvperslopeunit']
-            inParInfo['PWVGLOBALUNIT'] = parCat['pwvglobalunit']
-            inParInfo['O3UNIT'] = parCat['o3unit']
-            inParInfo['QESYSUNIT'] = parCat['qesysunit']
-            inParInfo['QESYSSLOPEUNIT'] = parCat['qesysslopeunit']
-            inParInfo['HASEXTERNALPWV'] = parCat['hasexternalpwv']
-            inParInfo['HASEXTERNALTAU'] = parCat['hasexternaltau']
-
-            inParams = np.zeros(1, dtype=[('PARALPHA', 'f8', parCat['paralpha'].size),
-                                          ('PARO3', 'f8', parCat['paro3'].size),
-                                          ('PARLNTAUINTERCEPT', 'f8',
-                                           parCat['parlntauintercept'].size),
-                                          ('PARLNTAUSLOPE', 'f8',
-                                           parCat['parlntauslope'].size),
-                                          ('PARPWVINTERCEPT', 'f8',
-                                           parCat['parpwvintercept'].size),
-                                          ('PARPWVPERSLOPE', 'f8',
-                                           parCat['parpwvperslope'].size),
-                                          ('PARQESYSINTERCEPT', 'f8',
-                                           parCat['parqesysintercept'].size),
-                                          ('PARQESYSSLOPE', 'f8',
-                                           parCat['parqesysslope'].size),
-                                          ('PARRETRIEVEDPWVSCALE', 'f8'),
-                                          ('PARRETRIEVEDPWVOFFSET', 'f8'),
-                                          ('PARRETRIEVEDPWVNIGHTLYOFFSET', 'f8',
-                                           parCat['parretrievedpwvnightlyoffset'].size),
-                                          ('COMPAPERCORRPIVOT', 'f8',
-                                           parCat['compapercorrpivot'].size),
-                                          ('COMPAPERCORRSLOPE', 'f8',
-                                           parCat['compapercorrslope'].size),
-                                          ('COMPAPERCORRSLOPEERR', 'f8',
-                                           parCat['compapercorrslopeerr'].size),
-                                          ('COMPAPERCORRRANGE', 'f8',
-                                           parCat['compapercorrrange'].size),
-                                          ('COMPMODELERREXPTIMEPIVOT', 'f8',
-                                           parCat['compmodelerrexptimepivot'].size),
-                                          ('COMPMODELERRFWHMPIVOT', 'f8',
-                                           parCat['compmodelerrfwhmpivot'].size),
-                                          ('COMPMODELERRSKYPIVOT', 'f8',
-                                           parCat['compmodelerrskypivot'].size),
-                                          ('COMPMODELERRPARS', 'f8',
-                                           parCat['compmodelerrpars'].size),
-                                          ('COMPEXPGRAY', 'f8',
-                                           parCat['compexpgray'].size),
-                                          ('COMPVARGRAY', 'f8',
-                                           parCat['compvargray'].size),
-                                          ('COMPNGOODSTARPEREXP', 'i4',
-                                           parCat['compngoodstarperexp'].size),
-                                          ('COMPSIGFGCM', 'f8',
-                                           parCat['compsigfgcm'].size),
-                                          ('COMPRETRIEVEDPWV', 'f8',
-                                           parCat['compretrievedpwv'].size),
-                                          ('COMPRETRIEVEDPWVRAW', 'f8',
-                                           parCat['compretrievedpwvraw'].size),
-                                          ('COMPRETRIEVEDPWVFLAG', 'i2',
-                                           parCat['compretrievedpwvflag'].size),
-                                          ('COMPRETRIEVEDTAUNIGHT', 'f8',
-                                           parCat['compretrievedtaunight'].size)])
-
-            inParams['PARALPHA'][:] = parCat['paralpha'][0, :]
-            inParams['PARO3'][:] = parCat['paro3'][0, :]
-            inParams['PARLNTAUINTERCEPT'][:] = parCat['parlntauintercept'][0, :]
-            inParams['PARLNTAUSLOPE'][:] = parCat['parlntauslope'][0, :]
-            inParams['PARPWVINTERCEPT'][:] = parCat['parpwvintercept'][0, :]
-            inParams['PARQESYSINTERCEPT'][:] = parCat['parqesysintercept'][0, :]
-            inParams['PARQESYSSLOPE'][:] = parCat['parqesysslope'][0, :]
-            inParams['PARRETRIEVEDPWVSCALE'] = parCat['parretrievedpwvscale']
-            inParams['PARRETRIEVEDPWVOFFSET'] = parCat['parretrievedpwvoffset']
-            inParams['PARRETRIEVEDPWVNIGHTLYOFFSET'][:] = parCat['parretrievedpwvnightlyoffset'][0, :]
-            inParams['COMPAPERCORRPIVOT'][:] = parCat['compapercorrpivot'][0, :]
-            inParams['COMPAPERCORRSLOPE'][:] = parCat['compapercorrslope'][0, :]
-            inParams['COMPAPERCORRSLOPEERR'][:] = parCat['compapercorrslopeerr'][0, :]
-            inParams['COMPAPERCORRRANGE'][:] = parCat['compapercorrrange'][0, :]
-            inParams['COMPMODELERREXPTIMEPIVOT'][:] = parCat['compmodelerrexptimepivot'][0, :]
-            inParams['COMPMODELERRFWHMPIVOT'][:] = parCat['compmodelerrfwhmpivot'][0, :]
-            inParams['COMPMODELERRSKYPIVOT'][:] = parCat['compmodelerrskypivot'][0, :]
-            inParams['COMPMODELERRPARS'][:] = parCat['compmodelerrpars'][0, :]
-            inParams['COMPEXPGRAY'][:] = parCat['compexpgray'][0, :]
-            inParams['COMPVARGRAY'][:] = parCat['compvargray'][0, :]
-            inParams['COMPNGOODSTARPEREXP'][:] = parCat['compngoodstarperexp'][0, :]
-            inParams['COMPSIGFGCM'][:] = parCat['compsigfgcm'][0, :]
-            inParams['COMPRETRIEVEDPWV'][:] = parCat['compretrievedpwv'][0, :]
-            inParams['COMPRETRIEVEDPWVRAW'][:] = parCat['compretrievedpwvraw'][0, :]
-            inParams['COMPRETRIEVEDPWVFLAG'][:] = parCat['compretrievedpwvflag'][0, :]
-            inParams['COMPRETRIEVEDTAUNIGHT'][:] = parCat['compretrievedtaunight'][0, :]
-
-            inSuperStar = np.zeros(parCat['superstarsize'][0, :], dtype='f8')
-            inSuperStar[:, :, :, :] = parCat['superstar'][0, :].reshape(inSuperStar.shape)
-
+            inParInfo, inParams, inSuperStar = self._loadParameters(butler)
             fgcmPars = fgcm.FgcmParameters.loadParsWithArrays(fgcmFitCycle.fgcmConfig,
                                                               fgcmExpInfo,
                                                               inParInfo,
@@ -797,32 +554,32 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         # grab the flagged stars if available
         if butler.datasetExists('fgcmFlaggedStars', fgcmcycle=lastCycle):
             flaggedStars = butler.get('fgcmFlaggedStars', fgcmcycle=lastCycle)
-            flagId = flaggedStars['objid'][:]
-            flagFlag = flaggedStars['objflag'][:]
+            flagId = flaggedStars['objId'][:]
+            flagFlag = flaggedStars['objFlag'][:]
         else:
             flagId = None
             flagFlag = None
 
         # match star observations to visits
-        visitIndex = np.searchsorted(fgcmExpInfo['VISIT'], starObs['visit'][starIndices['obsindex']])
+        visitIndex = np.searchsorted(fgcmExpInfo['VISIT'], starObs['visit'][starIndices['obsIndex']])
 
         # note that we only need the star observations from specific indices
 
         fgcmStars.loadStars(fgcmPars,
-                            starObs['visit'][starIndices['obsindex']],
-                            starObs['ccd'][starIndices['obsindex']],
-                            np.rad2deg(starObs['ra'][starIndices['obsindex']]),
-                            np.rad2deg(starObs['dec'][starIndices['obsindex']]),
-                            starObs['instMag'][starIndices['obsindex']],
-                            starObs['instMagErr'][starIndices['obsindex']],
+                            starObs['visit'][starIndices['obsIndex']],
+                            starObs['ccd'][starIndices['obsIndex']],
+                            np.rad2deg(starObs['ra'][starIndices['obsIndex']]),
+                            np.rad2deg(starObs['dec'][starIndices['obsIndex']]),
+                            starObs['instMag'][starIndices['obsIndex']],
+                            starObs['instMagErr'][starIndices['obsIndex']],
                             fgcmExpInfo['FILTERNAME'][visitIndex],
                             starIds['fgcm_id'][:],
                             starIds['ra'][:],
                             starIds['dec'][:],
-                            starIds['obsarrindex'][:],
-                            starIds['nobs'][:],
-                            obsX=starObs['x'][starIndices['obsindex']],
-                            obsY=starObs['y'][starIndices['obsindex']],
+                            starIds['obsArrIndex'][:],
+                            starIds['nObs'][:],
+                            obsX=starObs['x'][starIndices['obsIndex']],
+                            obsY=starObs['y'][starIndices['obsIndex']],
                             flagID=flagId,
                             flagFlag=flagFlag,
                             computeNobs=True)
@@ -863,296 +620,40 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         notFitBandString = comma.join([n.decode('utf-8')
                                        for n in parInfo['NOTFITBANDS'][0]])
 
-        # parameter info section
-        parSchema.addField('nccd', type=np.int32, doc='Number of CCDs')
-        parSchema.addField('lutfilternames', type=str, doc='LUT Filter names in parameter file',
-                           size=len(lutFilterNameString))
-        parSchema.addField('fitbands', type=str, doc='Bands that were fit',
-                           size=len(fitBandString))
-        parSchema.addField('notfitbands', type=str, doc='Bands that were not fit',
-                           size=len(notFitBandString))
-        parSchema.addField('lntauunit', type=np.float64, doc='Step units for ln(AOD)')
-        parSchema.addField('lntauslopeunit', type=np.float64,
-                           doc='Step units for ln(AOD) slope')
-        parSchema.addField('alphaunit', type=np.float64, doc='Step units for alpha')
-        parSchema.addField('pwvunit', type=np.float64, doc='Step units for pwv')
-        parSchema.addField('pwvperslopeunit', type=np.float64,
-                           doc='Step units for PWV percent slope')
-        parSchema.addField('pwvglobalunit', type=np.float64,
-                           doc='Step units for global PWV parameters')
-        parSchema.addField('o3unit', type=np.float64, doc='Step units for O3')
-        parSchema.addField('qesysunit', type=np.float64, doc='Step units for mirror gray')
-        parSchema.addField('qesysslopeunit', type=np.float64, doc='Step units for mirror gray slope')
-        parSchema.addField('hasexternalpwv', type=np.int32, doc='Parameters fit using external pwv')
-        parSchema.addField('hasexternaltau', type=np.int32, doc='Parameters fit using external tau')
-
-        # parameter section
-        parSchema.addField('paralpha', type='ArrayD', doc='Alpha parameter vector',
-                           size=pars['PARALPHA'].size)
-        parSchema.addField('paro3', type='ArrayD', doc='O3 parameter vector',
-                           size=pars['PARO3'].size)
-        parSchema.addField('parlntauintercept', type='ArrayD',
-                           doc='ln(Tau) intercept parameter vector',
-                           size=pars['PARLNTAUINTERCEPT'].size)
-        parSchema.addField('parlntauslope', type='ArrayD',
-                           doc='ln(Tau) slope parameter vector',
-                           size=pars['PARLNTAUSLOPE'].size)
-        parSchema.addField('parpwvintercept', type='ArrayD', doc='PWV intercept parameter vector',
-                           size=pars['PARPWVINTERCEPT'].size)
-        parSchema.addField('parpwvperslope', type='ArrayD', doc='PWV percent slope parameter vector',
-                           size=pars['PARPWVPERSLOPE'].size)
-        parSchema.addField('parqesysintercept', type='ArrayD', doc='Mirror gray intercept parameter vector',
-                           size=pars['PARQESYSINTERCEPT'].size)
-        parSchema.addField('parqesysslope', type='ArrayD', doc='Mirror gray slope parameter vector',
-                           size=pars['PARQESYSSLOPE'].size)
-        parSchema.addField('parretrievedpwvscale', type=np.float64,
-                           doc='Global scale for retrieved PWV')
-        parSchema.addField('parretrievedpwvoffset', type=np.float64,
-                           doc='Global offset for retrieved PWV')
-        parSchema.addField('parretrievedpwvnightlyoffset', type='ArrayD',
-                           doc='Nightly offset for retrieved PWV',
-                           size=pars['PARRETRIEVEDPWVNIGHTLYOFFSET'].size)
-        parSchema.addField('compapercorrpivot', type='ArrayD', doc='Aperture correction pivot',
-                           size=pars['COMPAPERCORRPIVOT'].size)
-        parSchema.addField('compapercorrslope', type='ArrayD', doc='Aperture correction slope',
-                           size=pars['COMPAPERCORRSLOPE'].size)
-        parSchema.addField('compapercorrslopeerr', type='ArrayD', doc='Aperture correction slope error',
-                           size=pars['COMPAPERCORRSLOPEERR'].size)
-        parSchema.addField('compapercorrrange', type='ArrayD', doc='Aperture correction range',
-                           size=pars['COMPAPERCORRRANGE'].size)
-        parSchema.addField('compmodelerrexptimepivot', type='ArrayD', doc='Model error exptime pivot',
-                           size=pars['COMPMODELERREXPTIMEPIVOT'].size)
-        parSchema.addField('compmodelerrfwhmpivot', type='ArrayD', doc='Model error fwhm pivot',
-                           size=pars['COMPMODELERRFWHMPIVOT'].size)
-        parSchema.addField('compmodelerrskypivot', type='ArrayD', doc='Model error sky pivot',
-                           size=pars['COMPMODELERRSKYPIVOT'].size)
-        parSchema.addField('compmodelerrpars', type='ArrayD', doc='Model error parameters',
-                           size=pars['COMPMODELERRPARS'].size)
-        parSchema.addField('compexpgray', type='ArrayD', doc='Computed exposure gray',
-                           size=pars['COMPEXPGRAY'].size)
-        parSchema.addField('compvargray', type='ArrayD', doc='Computed exposure variance',
-                           size=pars['COMPVARGRAY'].size)
-        parSchema.addField('compngoodstarperexp', type='ArrayI',
-                           doc='Computed number of good stars per exposure',
-                           size=pars['COMPNGOODSTARPEREXP'].size)
-        parSchema.addField('compsigfgcm', type='ArrayD', doc='Computed sigma_fgcm',
-                           size=pars['COMPSIGFGCM'].size)
-        parSchema.addField('compretrievedpwv', type='ArrayD', doc='Retrieved PWV (smoothed)',
-                           size=pars['COMPRETRIEVEDPWV'].size)
-        parSchema.addField('compretrievedpwvraw', type='ArrayD', doc='Retrieved PWV (raw)',
-                           size=pars['COMPRETRIEVEDPWVRAW'].size)
-        parSchema.addField('compretrievedpwvflag', type='ArrayI', doc='Retrieved PWV Flag',
-                           size=pars['COMPRETRIEVEDPWVFLAG'].size)
-        parSchema.addField('compretrievedtaunight', type='ArrayD', doc='Retrieved tau (per night)',
-                           size=pars['COMPRETRIEVEDTAUNIGHT'].size)
-
-        # superstarflat section
-        parSchema.addField('superstarsize', type='ArrayI', doc='Superstar matrix size',
-                           size=4)
-        parSchema.addField('superstar', type='ArrayD', doc='Superstar matrix (flattened)',
-                           size=fgcmFitCycle.fgcmPars.parSuperStarFlat.size)
-
+        parSchema = self._makeParSchema(parInfo, pars, fgcmFitCycle.fgcmPars.parSuperStarFlat,
+                                        lutFilterNameString, fitBandString, notFitBandString)
         parCat = afwTable.BaseCatalog(parSchema)
         parCat.reserve(1)
 
-        rec = parCat.addNew()
-
-        # info section
-        rec['nccd'] = parInfo['NCCD']
-        rec['lutfilternames'] = lutFilterNameString
-        rec['fitbands'] = fitBandString
-        rec['notfitbands'] = notFitBandString
-        rec['lntauunit'] = parInfo['LNTAUUNIT']
-        rec['lntauslopeunit'] = parInfo['LNTAUSLOPEUNIT']
-        rec['alphaunit'] = parInfo['ALPHAUNIT']
-        rec['pwvunit'] = parInfo['PWVUNIT']
-        rec['pwvperslopeunit'] = parInfo['PWVPERSLOPEUNIT']
-        rec['pwvglobalunit'] = parInfo['PWVGLOBALUNIT']
-        rec['o3unit'] = parInfo['O3UNIT']
-        rec['qesysunit'] = parInfo['QESYSUNIT']
-        rec['qesysslopeunit'] = parInfo['QESYSSLOPEUNIT']
-        # note these are not currently supported here.
-        rec['hasexternalpwv'] = 0
-        rec['hasexternaltau'] = 0
-
-        # parameter section
-
-        scalarNames = ['parretrievedpwvscale', 'parretrievedpwvoffset']
-
-        arrNames = ['paralpha', 'paro3', 'parlntauintercept', 'parlntauslope',
-                    'parpwvintercept', 'parpwvperslope', 'parqesysintercept',
-                    'parqesysslope', 'parretrievedpwvnightlyoffset', 'compapercorrpivot',
-                    'compapercorrslope', 'compapercorrslopeerr', 'compapercorrrange',
-                    'compmodelerrexptimepivot', 'compmodelerrfwhmpivot',
-                    'compmodelerrskypivot', 'compmodelerrpars',
-                    'compexpgray', 'compvargray', 'compngoodstarperexp', 'compsigfgcm',
-                    'compretrievedpwv', 'compretrievedpwvraw', 'compretrievedpwvflag',
-                    'compretrievedtaunight']
-
-        for scalarName in scalarNames:
-            rec[scalarName] = pars[scalarName.upper()]
-
-        for arrName in arrNames:
-            rec[arrName][:] = np.atleast_1d(pars[0][arrName.upper()])[:]
-
-        # superstar section
-        rec['superstarsize'][:] = fgcmFitCycle.fgcmPars.parSuperStarFlat.shape
-        rec['superstar'][:] = fgcmFitCycle.fgcmPars.parSuperStarFlat.flatten()
+        self._fillParCatalog(parCat, parInfo, pars, fgcmFitCycle.fgcmPars.parSuperStarFlat,
+                             lutFilterNameString, fitBandString, notFitBandString)
 
         butler.put(parCat, 'fgcmFitParameters', fgcmcycle=self.config.cycleNumber)
 
         # Save the flagged stars
-        flagStarSchema = afwTable.Schema()
-
-        flagStarSchema.addField('objid', type=np.int32, doc='FGCM object id')
-        flagStarSchema.addField('objflag', type=np.int32, doc='FGCM object flag')
-
-        flagStarCat = afwTable.BaseCatalog(flagStarSchema)
+        flagStarSchema = self._makeFlagStarSchema()
         flagStarStruct = fgcmFitCycle.fgcmStars.getFlagStarIndices()
-        flagStarCat.reserve(flagStarStruct.size)
-        for i in xrange(flagStarStruct.size):
-            rec = flagStarCat.addNew()
-
-        if not flagStarCat.isContiguous():
-            flagStarCat = flagStarCat.copy(deep=True)
-
-        flagStarCat['objid'][:] = flagStarStruct['OBJID']
-        flagStarCat['objflag'][:] = flagStarStruct['OBJFLAG']
+        flagStarCat = self._makeFlagStarCat(flagStarSchema, flagStarStruct)
 
         butler.put(flagStarCat, 'fgcmFlaggedStars', fgcmcycle=self.config.cycleNumber)
 
-        # Save zeropoints
-        zptSchema = afwTable.Schema()
-
-        zptSchema.addField('visit', type=np.int32, doc='Visit number')
-        zptSchema.addField('ccd', type=np.int32, doc='CCD number')
-        zptSchema.addField('fgcmflag', type=np.int32, doc='FGCM flag value')
-        zptSchema.addField('fgcmzpt', type=np.float32, doc='FGCM zeropoint (center of CCD)')
-        zptSchema.addField('fgcmzpterr', type=np.float32,
-                           doc='Error on zeropoint, estimated from repeatability + number of obs')
-        if self.config.superStarSubCcd:
-            zptSchema.addField('fgcmfzptcheb', type='ArrayD',
-                               size=fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FZPT_CHEB'].shape[1],
-                               doc='Chebyshev parameters (flattened) for zeropoint')
-            zptSchema.addField('fgcmfzptchebxymax', type='ArrayD', size=2,
-                               doc='maximum x/maximum y to scale to apply chebyshev parameters')
-        zptSchema.addField('fgcmi0', type=np.float32, doc='Integral of the passband')
-        zptSchema.addField('fgcmi10', type=np.float32, doc='Normalized chromatic integral')
-        zptSchema.addField('fgcmr0', type=np.float32,
-                           doc='Retrieved i0 integral, estimated from stars (only for flag 1)')
-        zptSchema.addField('fgcmr10', type=np.float32,
-                           doc='Retrieved i10 integral, estimated from stars (only for flag 1)')
-        zptSchema.addField('fgcmgry', type=np.float32,
-                           doc='Estimated gray extinction relative to atmospheric solution; '
-                           'only for flag <= 4')
-        zptSchema.addField('fgcmzptvar', type=np.float32, doc='Variance of zeropoint over ccd')
-        zptSchema.addField('fgcmtilings', type=np.float32,
-                           doc='Number of photometric tilings used for solution for ccd')
-        zptSchema.addField('fgcmfpgry', type=np.float32,
-                           doc='Average gray extinction over the full focal plane '
-                           '(same for all ccds in a visit)')
-        zptSchema.addField('fgcmfpvar', type=np.float32,
-                           doc='Variance of gray extinction over the full focal plane '
-                           '(same for all ccds in a visit)')
-        zptSchema.addField('fgcmdust', type=np.float32,
-                           doc='Gray dust extinction from the primary/corrector'
-                           'at the time of the exposure')
-        zptSchema.addField('fgcmflat', type=np.float32, doc='Superstarflat illumination correction')
-        zptSchema.addField('fgcmapercorr', type=np.float32, doc='Aperture correction estimated by fgcm')
-        zptSchema.addField('exptime', type=np.float32, doc='Exposure time')
-        zptSchema.addField('filtername', type=str, size=2, doc='Filter name')
-
-        zptCat = afwTable.BaseCatalog(zptSchema)
-        zptCat.reserve(fgcmFitCycle.fgcmZpts.zpStruct.size)
-        for filterName in fgcmFitCycle.fgcmZpts.zpStruct['FILTERNAME']:
-            rec = zptCat.addNew()
-            rec['filtername'] = filterName.decode('utf-8')
-
-        if not zptCat.isContiguous():
-            zptCat = zptCat.copy(deep=True)
-
-        zptCat['visit'][:] = fgcmFitCycle.fgcmZpts.zpStruct['VISIT']
-        zptCat['ccd'][:] = fgcmFitCycle.fgcmZpts.zpStruct['CCD']
-        zptCat['fgcmflag'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FLAG']
-        zptCat['fgcmzpt'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_ZPT']
-        zptCat['fgcmzpterr'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_ZPTERR']
-        if self.config.superStarSubCcd:
-            zptCat['fgcmfzptcheb'][:, :] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FZPT_CHEB']
-            zptCat['fgcmfzptchebxymax'][:, :] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FZPT_CHEB_XYMAX']
-        zptCat['fgcmi0'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_I0']
-        zptCat['fgcmi10'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_I10']
-        zptCat['fgcmr0'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_R0']
-        zptCat['fgcmr10'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_R10']
-        zptCat['fgcmgry'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_GRY']
-        zptCat['fgcmzptvar'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_ZPTVAR']
-        zptCat['fgcmtilings'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_TILINGS']
-        zptCat['fgcmfpgry'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FPGRY']
-        zptCat['fgcmfpvar'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FPVAR']
-        zptCat['fgcmdust'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_DUST']
-        zptCat['fgcmflat'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FLAT']
-        zptCat['fgcmapercorr'][:] = fgcmFitCycle.fgcmZpts.zpStruct['FGCM_APERCORR']
-        zptCat['exptime'][:] = fgcmFitCycle.fgcmZpts.zpStruct['EXPTIME']
+        # Save the zeropoint information
+        zptSchema = self._makeZptSchema(fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FZPT_CHEB'].shape[1])
+        zptCat = self._makeZptCat(zptSchema, fgcmFitCycle.fgcmZpts.zpStruct)
 
         butler.put(zptCat, 'fgcmZeropoints', fgcmcycle=self.config.cycleNumber)
 
         # Save atmosphere values
 
-        atmSchema = afwTable.Schema()
-
-        atmSchema.addField('visit', type=np.int32, doc='Visit number')
-        atmSchema.addField('pmb', type=np.float64, doc='Barometric pressure (mb)')
-        atmSchema.addField('pwv', type=np.float64, doc='Water vapor (mm)')
-        atmSchema.addField('tau', type=np.float64, doc='Aerosol optical depth')
-        atmSchema.addField('alpha', type=np.float64, doc='Aerosol slope')
-        atmSchema.addField('o3', type=np.float64, doc='Ozone (dobson)')
-        atmSchema.addField('seczenith', type=np.float64, doc='Secant(zenith) (~ airmass)')
-
-        atmCat = afwTable.BaseCatalog(atmSchema)
-        atmCat.reserve(fgcmFitCycle.fgcmZpts.atmStruct.size)
-        for i in xrange(fgcmFitCycle.fgcmZpts.atmStruct.size):
-            rec = atmCat.addNew()
-
-        if not atmCat.isContiguous():
-            atmCat = atmCat.copy(deep=True)
-
-        atmCat['visit'][:] = fgcmFitCycle.fgcmZpts.atmStruct['VISIT']
-        atmCat['pmb'][:] = fgcmFitCycle.fgcmZpts.atmStruct['PMB']
-        atmCat['pwv'][:] = fgcmFitCycle.fgcmZpts.atmStruct['PWV']
-        atmCat['tau'][:] = fgcmFitCycle.fgcmZpts.atmStruct['TAU']
-        atmCat['alpha'][:] = fgcmFitCycle.fgcmZpts.atmStruct['ALPHA']
-        atmCat['o3'][:] = fgcmFitCycle.fgcmZpts.atmStruct['O3']
-        atmCat['seczenith'][:] = fgcmFitCycle.fgcmZpts.atmStruct['SECZENITH']
+        atmSchema = self._makeAtmSchema()
+        atmCat = self._makeAtmCat(atmSchema, fgcmFitCycle.fgcmZpts.atmStruct)
 
         butler.put(atmCat, 'fgcmAtmosphereParameters', fgcmcycle=self.config.cycleNumber)
 
         if self.config.outputStandards:
-            stdSchema = afwTable.SimpleTable.makeMinimalSchema()
-            stdSchema.addField('ngood', type='ArrayI', doc='Number of good observations',
-                               size=len(self.config.bands))
-            stdSchema.addField('mag_std_noabs', type='ArrayF',
-                               doc='Standard magnitude (no absolute calibration)',
-                               size=len(self.config.bands))
-            stdSchema.addField('magerr_std', type='ArrayF',
-                               doc='Standard magnitude error',
-                               size=len(self.config.bands))
-
-            outCat = fgcmFitCycle.fgcmStars.retrieveStdStarCatalog(fgcmFitCycle.fgcmPars)
-            stdCat = afwTable.SimpleCatalog(stdSchema)
-
-            stdCat.reserve(outCat.size)
-            for i in range(outCat.size):
-                rec = stdCat.addNew()
-
-            # Sometimes the reserve doesn't actually make a contiguous catalog (sigh)
-            if not stdCat.isContiguous():
-                stdCat = stdCat.copy(deep=True)
-
-            stdCat['id'][:] = outCat['FGCM_ID']
-            stdCat['coord_ra'][:] = outCat['RA'] * lsst.geom.degrees
-            stdCat['coord_dec'][:] = outCat['DEC'] * lsst.geom.degrees
-            stdCat['ngood'][:, :] = outCat['NGOOD'][:, :]
-            stdCat['mag_std_noabs'][:, :] = outCat['MAG_STD'][:, :]
-            stdCat['magerr_std'][:, :] = outCat['MAGERR_STD'][:, :]
+            stdSchema = self._makeStdSchema()
+            stdStruct = fgcmFitCycle.fgcmStars.retrieveStdStarCatalog(fgcmFitCycle.fgcmPars)
+            stdCat = self._makeStdCat(stdSchema, stdStruct)
 
             butler.put(stdCat, 'fgcmStandardStars', fgcmcycle=self.config.cycleNumber)
 
@@ -1190,8 +691,8 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
         # first we need the lutIndexVals
         # dtype is set for py2/py3/fits/fgcm compatibility
-        lutFilterNames = np.array(lutCat[0]['filternames'].split(','), dtype='a')
-        lutStdFilterNames = np.array(lutCat[0]['stdfilternames'].split(','), dtype='a')
+        lutFilterNames = np.array(lutCat[0]['filterNames'].split(','), dtype='a')
+        lutStdFilterNames = np.array(lutCat[0]['stdFilterNames'].split(','), dtype='a')
 
         # FIXME: check that lutBands equal listed bands!
 
@@ -1200,7 +701,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                                           ('STDFILTERNAMES', lutStdFilterNames.dtype.str,
                                            lutStdFilterNames.size),
                                           ('PMB', 'f8', lutCat[0]['pmb'].size),
-                                          ('PMBFACTOR', 'f8', lutCat[0]['pmbfactor'].size),
+                                          ('PMBFACTOR', 'f8', lutCat[0]['pmbFactor'].size),
                                           ('PMBELEVATION', 'f8'),
                                           ('LAMBDANORM', 'f8'),
                                           ('PWV', 'f8', lutCat[0]['pwv'].size),
@@ -1213,15 +714,15 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         lutIndexVals['FILTERNAMES'][:] = lutFilterNames
         lutIndexVals['STDFILTERNAMES'][:] = lutStdFilterNames
         lutIndexVals['PMB'][:] = lutCat[0]['pmb']
-        lutIndexVals['PMBFACTOR'][:] = lutCat[0]['pmbfactor']
-        lutIndexVals['PMBELEVATION'] = lutCat[0]['pmbelevation']
-        lutIndexVals['LAMBDANORM'] = lutCat[0]['lambdanorm']
+        lutIndexVals['PMBFACTOR'][:] = lutCat[0]['pmbFactor']
+        lutIndexVals['PMBELEVATION'] = lutCat[0]['pmbElevation']
+        lutIndexVals['LAMBDANORM'] = lutCat[0]['lambdaNorm']
         lutIndexVals['PWV'][:] = lutCat[0]['pwv']
         lutIndexVals['O3'][:] = lutCat[0]['o3']
         lutIndexVals['TAU'][:] = lutCat[0]['tau']
         lutIndexVals['ALPHA'][:] = lutCat[0]['alpha']
         lutIndexVals['ZENITH'][:] = lutCat[0]['zenith']
-        lutIndexVals['NCCD'] = lutCat[0]['nccd']
+        lutIndexVals['NCCD'] = lutCat[0]['nCcd']
 
         # now we need the Standard Values
         lutStd = np.zeros(1, dtype=[('PMBSTD', 'f8'),
@@ -1238,24 +739,24 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                                     ('I1STD', 'f8', lutFilterNames.size),
                                     ('I10STD', 'f8', lutFilterNames.size),
                                     ('LAMBDAB', 'f8', lutFilterNames.size),
-                                    ('ATMLAMBDA', 'f8', lutCat[0]['atmlambda'].size),
-                                    ('ATMSTDTRANS', 'f8', lutCat[0]['atmstdtrans'].size)])
-        lutStd['PMBSTD'] = lutCat[0]['pmbstd']
-        lutStd['PWVSTD'] = lutCat[0]['pwvstd']
-        lutStd['O3STD'] = lutCat[0]['o3std']
-        lutStd['TAUSTD'] = lutCat[0]['taustd']
-        lutStd['ALPHASTD'] = lutCat[0]['alphastd']
-        lutStd['ZENITHSTD'] = lutCat[0]['zenithstd']
-        lutStd['LAMBDARANGE'][:] = lutCat[0]['lambdarange'][:]
-        lutStd['LAMBDASTEP'] = lutCat[0]['lambdastep']
-        lutStd['LAMBDASTD'][:] = lutCat[0]['lambdastd']
-        lutStd['LAMBDASTDFILTER'][:] = lutCat[0]['lambdastdfilter']
-        lutStd['I0STD'][:] = lutCat[0]['i0std']
-        lutStd['I1STD'][:] = lutCat[0]['i1std']
-        lutStd['I10STD'][:] = lutCat[0]['i10std']
-        lutStd['LAMBDAB'][:] = lutCat[0]['lambdab']
-        lutStd['ATMLAMBDA'][:] = lutCat[0]['atmlambda'][:]
-        lutStd['ATMSTDTRANS'][:] = lutCat[0]['atmstdtrans'][:]
+                                    ('ATMLAMBDA', 'f8', lutCat[0]['atmLambda'].size),
+                                    ('ATMSTDTRANS', 'f8', lutCat[0]['atmStdTrans'].size)])
+        lutStd['PMBSTD'] = lutCat[0]['pmbStd']
+        lutStd['PWVSTD'] = lutCat[0]['pwvStd']
+        lutStd['O3STD'] = lutCat[0]['o3Std']
+        lutStd['TAUSTD'] = lutCat[0]['tauStd']
+        lutStd['ALPHASTD'] = lutCat[0]['alphaStd']
+        lutStd['ZENITHSTD'] = lutCat[0]['zenithStd']
+        lutStd['LAMBDARANGE'][:] = lutCat[0]['lambdaRange'][:]
+        lutStd['LAMBDASTEP'] = lutCat[0]['lambdaStep']
+        lutStd['LAMBDASTD'][:] = lutCat[0]['lambdaStd']
+        lutStd['LAMBDASTDFILTER'][:] = lutCat[0]['lambdaStdFilter']
+        lutStd['I0STD'][:] = lutCat[0]['i0Std']
+        lutStd['I1STD'][:] = lutCat[0]['i1Std']
+        lutStd['I10STD'][:] = lutCat[0]['i10Std']
+        lutStd['LAMBDAB'][:] = lutCat[0]['lambdaB']
+        lutStd['ATMLAMBDA'][:] = lutCat[0]['atmLambda'][:]
+        lutStd['ATMSTDTRANS'][:] = lutCat[0]['atmStdTrans'][:]
 
         lutTypes = []
         for row in lutCat:
@@ -1383,3 +884,713 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
             ccdOffsets['Y_SIZE'][i] = bbox.getMaxY()
 
         return ccdOffsets
+
+    def _makeConfigDict(self, camera):
+        """
+        Make the FGCM configuration dict
+
+        Parameters
+        ----------
+        camera: 'cameraType`
+            Camera from the mapper
+
+        Returns
+        -------
+        configDict: `dict`
+        """
+
+        fitFlag = np.array(self.config.fitFlag, dtype=np.bool)
+        requiredFlag = np.array(self.config.requiredFlag, dtype=np.bool)
+
+        fitBands = [b for i, b in enumerate(self.config.bands) if fitFlag[i]]
+        notFitBands = [b for i, b in enumerate(self.config.bands) if not fitFlag[i]]
+        requiredBands = [b for i, b in enumerate(self.config.bands) if requiredFlag[i]]
+
+        # process the starColorCuts
+        starColorCutList = []
+        for ccut in self.config.starColorCuts:
+            parts = ccut.split(',')
+            starColorCutList.append([parts[0], parts[1], float(parts[2]), float(parts[3])])
+
+        if self.config.maxIter == 0:
+            resetParameters = False
+        else:
+            resetParameters = True
+
+        # Mirror area in cm**2
+        mirrorArea = np.pi*(camera.telescopeDiameter*100./2.)**2.
+
+        # create a configuration dictionary for fgcmFitCycle
+        configDict = {'outfileBase': self.config.outfileBase,
+                      'logger': self.log,
+                      'exposureFile': None,
+                      'obsFile': None,
+                      'indexFile': None,
+                      'lutFile': None,
+                      'mirrorArea': mirrorArea,
+                      'cameraGain': self.config.cameraGain,
+                      'ccdStartIndex': camera[0].getId(),
+                      'expField': 'VISIT',
+                      'ccdField': 'CCD',
+                      'seeingField': 'DELTA_APER',
+                      'fwhmField': 'PSFSIGMA',
+                      'skyBrightnessField': 'SKYBACKGROUND',
+                      'deepFlag': 'DEEPFLAG',  # unused
+                      'bands': list(self.config.bands),
+                      'fitBands': list(fitBands),
+                      'notFitBands': list(notFitBands),
+                      'requiredBands': list(requiredBands),
+                      'filterToBand': dict(self.config.filterToBand),
+                      'logLevel': 'INFO',  # FIXME
+                      'nCore': self.config.nCore,
+                      'nStarPerRun': self.config.nStarPerRun,
+                      'nExpPerRun': self.config.nExpPerRun,
+                      'reserveFraction': self.config.reserveFraction,
+                      'freezeStdAtmosphere': self.config.freezeStdAtmosphere,
+                      'precomputeSuperStarInitialCycle': self.config.precomputeSuperStarInitialCycle,
+                      'superStarSubCCD': self.config.superStarSubCcd,
+                      'superStarSubCCDChebyshevOrder': self.config.superStarSubCcdChebyshevOrder,
+                      'superStarSigmaClip': self.config.superStarSigmaClip,
+                      'cycleNumber': self.config.cycleNumber,
+                      'maxIter': self.config.maxIter,
+                      'UTBoundary': self.config.utBoundary,
+                      'washMJDs': self.config.washMjds,
+                      'epochMJDs': self.config.epochMjds,
+                      'minObsPerBand': self.config.minObsPerBand,
+                      'latitude': self.config.latitude,
+                      'brightObsGrayMax': self.config.brightObsGrayMax,
+                      'minStarPerCCD': self.config.minStarPerCcd,
+                      'minCCDPerExp': self.config.minCcdPerExp,
+                      'maxCCDGrayErr': self.config.maxCcdGrayErr,
+                      'minStarPerExp': self.config.minStarPerExp,
+                      'minExpPerNight': self.config.minExpPerNight,
+                      'expGrayInitialCut': self.config.expGrayInitialCut,
+                      'expGrayPhotometricCut': np.array(self.config.expGrayPhotometricCut),
+                      'expGrayHighCut': np.array(self.config.expGrayHighCut),
+                      'expGrayRecoverCut': self.config.expGrayRecoverCut,
+                      'expVarGrayPhotometricCut': self.config.expVarGrayPhotometricCut,
+                      'expGrayErrRecoverCut': self.config.expGrayErrRecoverCut,
+                      'illegalValue': self.config.illegalValue,
+                      'starColorCuts': starColorCutList,
+                      'aperCorrFitNBins': self.config.aperCorrFitNBins,
+                      'sedFudgeFactors': np.array(self.config.sedFudgeFactors),
+                      'colorSplitIndices': np.array(self.config.colorSplitIndices),
+                      'sigFgcmMaxErr': self.config.sigFgcmMaxErr,
+                      'sigFgcmMaxEGray': self.config.sigFgcmMaxEGray,
+                      'ccdGrayMaxStarErr': self.config.ccdGrayMaxStarErr,
+                      'approxThroughput': self.config.approxThroughput,
+                      'sigma0Cal': self.config.sigma0Cal,
+                      'sigma0Phot': self.config.sigma0Phot,
+                      'mapLongitudeRef': self.config.mapLongitudeRef,
+                      'mapNSide': self.config.mapNSide,
+                      'varNSig': self.config.varNSig,
+                      'varMinBand': self.config.varMinBand,
+                      'useRetrievedPWV': False,
+                      'useNightlyRetrievedPWV': False,
+                      'pwvRetrievalSmoothBlock': 25,
+                      'useRetrievedTauInit': False,
+                      'tauRetrievalMinCCDPerNight': 500,
+                      'modelMagErrors': self.config.modelMagErrors,
+                      'printOnly': False,
+                      'outputStars': False,
+                      'clobber': True,
+                      'useSedLUT': False,
+                      'resetParameters': resetParameters}
+
+        return configDict
+
+    def _loadParameters(self, butler):
+        """
+        Load FGCM parameters from a previous fit cycle
+
+        Parameters
+        ----------
+        butler:  `lsst.daf.persistence.Butler`
+
+        Returns
+        -------
+        inParInfo: `np.ndarray`
+           Numpy array parameter information formatted for input to fgcm
+        inParameters: `np.ndarray`
+           Numpy array parameter values formatted for input to fgcm
+        inSuperStar: `np.array`
+           Superstar flat formatted for input to fgcm
+        """
+
+        # note that we already checked that this is available
+        parCat = butler.get('fgcmFitParameters', fgcmcycle=self.config.cycleNumber-1)
+
+        parLutFilterNames = np.array(parCat[0]['lutFilterNames'].split(','))
+        parFitBands = np.array(parCat[0]['fitBands'].split(','))
+        parNotFitBands = np.array(parCat[0]['notFitBands'].split(','))
+
+        # FIXME: check that these are the same as in the config, to be sure
+
+        inParInfo = np.zeros(1, dtype=[('NCCD', 'i4'),
+                                       ('LUTFILTERNAMES', parLutFilterNames.dtype.str,
+                                        parLutFilterNames.size),
+                                       ('FITBANDS', parFitBands.dtype.str, parFitBands.size),
+                                       ('NOTFITBANDS', parNotFitBands.dtype.str, parNotFitBands.size),
+                                       ('LNTAUUNIT', 'f8'),
+                                       ('LNTAUSLOPEUNIT', 'f8'),
+                                       ('ALPHAUNIT', 'f8'),
+                                       ('PWVUNIT', 'f8'),
+                                       ('PWVPERSLOPEUNIT', 'f8'),
+                                       ('PWVGLOBALUNIT', 'f8'),
+                                       ('O3UNIT', 'f8'),
+                                       ('QESYSUNIT', 'f8'),
+                                       ('QESYSSLOPEUNIT', 'f8'),
+
+                                       ('HASEXTERNALPWV', 'i2'),
+                                       ('HASEXTERNALTAU', 'i2')])
+        inParInfo['NCCD'] = parCat['nCcd']
+        inParInfo['LUTFILTERNAMES'][:] = parLutFilterNames
+        inParInfo['FITBANDS'][:] = parFitBands
+        inParInfo['NOTFITBANDS'][:] = parNotFitBands
+        inParInfo['LNTAUUNIT'] = parCat['lnTauUnit']
+        inParInfo['LNTAUSLOPEUNIT'] = parCat['lnTauSlopeUnit']
+        inParInfo['ALPHAUNIT'] = parCat['alphaUnit']
+        inParInfo['PWVUNIT'] = parCat['pwvUnit']
+        inParInfo['PWVPERSLOPEUNIT'] = parCat['pwvPerSlopeUnit']
+        inParInfo['PWVGLOBALUNIT'] = parCat['pwvGlobalUnit']
+        inParInfo['O3UNIT'] = parCat['o3Unit']
+        inParInfo['QESYSUNIT'] = parCat['qeSysUnit']
+        inParInfo['QESYSSLOPEUNIT'] = parCat['qeSysSlopeUnit']
+        inParInfo['HASEXTERNALPWV'] = parCat['hasExternalPwv']
+        inParInfo['HASEXTERNALTAU'] = parCat['hasExternalTau']
+
+        inParams = np.zeros(1, dtype=[('PARALPHA', 'f8', parCat['parAlpha'].size),
+                                      ('PARO3', 'f8', parCat['parO3'].size),
+                                      ('PARLNTAUINTERCEPT', 'f8',
+                                       parCat['parLnTauIntercept'].size),
+                                      ('PARLNTAUSLOPE', 'f8',
+                                       parCat['parLnTauSlope'].size),
+                                      ('PARPWVINTERCEPT', 'f8',
+                                       parCat['parPwvIntercept'].size),
+                                      ('PARPWVPERSLOPE', 'f8',
+                                       parCat['parPwvPerSlope'].size),
+                                      ('PARQESYSINTERCEPT', 'f8',
+                                       parCat['parQeSysIntercept'].size),
+                                      ('PARQESYSSLOPE', 'f8',
+                                       parCat['parQeSysSlope'].size),
+                                      ('PARRETRIEVEDPWVSCALE', 'f8'),
+                                      ('PARRETRIEVEDPWVOFFSET', 'f8'),
+                                      ('PARRETRIEVEDPWVNIGHTLYOFFSET', 'f8',
+                                       parCat['parRetrievedPwvNightlyOffset'].size),
+                                      ('COMPAPERCORRPIVOT', 'f8',
+                                       parCat['compAperCorrPivot'].size),
+                                      ('COMPAPERCORRSLOPE', 'f8',
+                                       parCat['compAperCorrSlope'].size),
+                                      ('COMPAPERCORRSLOPEERR', 'f8',
+                                       parCat['compAperCorrSlopeErr'].size),
+                                      ('COMPAPERCORRRANGE', 'f8',
+                                       parCat['compAperCorrRange'].size),
+                                      ('COMPMODELERREXPTIMEPIVOT', 'f8',
+                                       parCat['compModelErrExptimePivot'].size),
+                                      ('COMPMODELERRFWHMPIVOT', 'f8',
+                                       parCat['compModelErrFwhmPivot'].size),
+                                      ('COMPMODELERRSKYPIVOT', 'f8',
+                                       parCat['compModelErrSkyPivot'].size),
+                                      ('COMPMODELERRPARS', 'f8',
+                                       parCat['compModelErrPars'].size),
+                                      ('COMPEXPGRAY', 'f8',
+                                       parCat['compExpGray'].size),
+                                      ('COMPVARGRAY', 'f8',
+                                       parCat['compVarGray'].size),
+                                      ('COMPNGOODSTARPEREXP', 'i4',
+                                       parCat['compNGoodStarPerExp'].size),
+                                      ('COMPSIGFGCM', 'f8',
+                                       parCat['compSigFgcm'].size),
+                                      ('COMPRETRIEVEDPWV', 'f8',
+                                       parCat['compRetrievedPwv'].size),
+                                      ('COMPRETRIEVEDPWVRAW', 'f8',
+                                       parCat['compRetrievedPwvRaw'].size),
+                                      ('COMPRETRIEVEDPWVFLAG', 'i2',
+                                       parCat['compRetrievedPwvFlag'].size),
+                                      ('COMPRETRIEVEDTAUNIGHT', 'f8',
+                                       parCat['compRetrievedTauNight'].size)])
+
+        inParams['PARALPHA'][:] = parCat['parAlpha'][0, :]
+        inParams['PARO3'][:] = parCat['parO3'][0, :]
+        inParams['PARLNTAUINTERCEPT'][:] = parCat['parLnTauIntercept'][0, :]
+        inParams['PARLNTAUSLOPE'][:] = parCat['parLnTauSlope'][0, :]
+        inParams['PARPWVINTERCEPT'][:] = parCat['parPwvIntercept'][0, :]
+        inParams['PARQESYSINTERCEPT'][:] = parCat['parQeSysIntercept'][0, :]
+        inParams['PARQESYSSLOPE'][:] = parCat['parQeSysSlope'][0, :]
+        inParams['PARRETRIEVEDPWVSCALE'] = parCat['parRetrievedPwvScale']
+        inParams['PARRETRIEVEDPWVOFFSET'] = parCat['parRetrievedPwvOffset']
+        inParams['PARRETRIEVEDPWVNIGHTLYOFFSET'][:] = parCat['parRetrievedPwvNightlyOffset'][0, :]
+        inParams['COMPAPERCORRPIVOT'][:] = parCat['compAperCorrPivot'][0, :]
+        inParams['COMPAPERCORRSLOPE'][:] = parCat['compAperCorrSlope'][0, :]
+        inParams['COMPAPERCORRSLOPEERR'][:] = parCat['compAperCorrSlopeErr'][0, :]
+        inParams['COMPAPERCORRRANGE'][:] = parCat['compAperCorrRange'][0, :]
+        inParams['COMPMODELERREXPTIMEPIVOT'][:] = parCat['compModelErrExptimePivot'][0, :]
+        inParams['COMPMODELERRFWHMPIVOT'][:] = parCat['compModelErrFwhmPivot'][0, :]
+        inParams['COMPMODELERRSKYPIVOT'][:] = parCat['compModelErrSkyPivot'][0, :]
+        inParams['COMPMODELERRPARS'][:] = parCat['compModelErrPars'][0, :]
+        inParams['COMPEXPGRAY'][:] = parCat['compExpGray'][0, :]
+        inParams['COMPVARGRAY'][:] = parCat['compVarGray'][0, :]
+        inParams['COMPNGOODSTARPEREXP'][:] = parCat['compNGoodStarPerExp'][0, :]
+        inParams['COMPSIGFGCM'][:] = parCat['compSigFgcm'][0, :]
+        inParams['COMPRETRIEVEDPWV'][:] = parCat['compRetrievedPwv'][0, :]
+        inParams['COMPRETRIEVEDPWVRAW'][:] = parCat['compRetrievedPwvRaw'][0, :]
+        inParams['COMPRETRIEVEDPWVFLAG'][:] = parCat['compRetrievedPwvFlag'][0, :]
+        inParams['COMPRETRIEVEDTAUNIGHT'][:] = parCat['compRetrievedTauNight'][0, :]
+
+        inSuperStar = np.zeros(parCat['superstarSize'][0, :], dtype='f8')
+        inSuperStar[:, :, :, :] = parCat['superstar'][0, :].reshape(inSuperStar.shape)
+
+        return (inParInfo, inParams, inSuperStar)
+
+    def _makeParSchema(self, parInfo, pars, parSuperStarFlat,
+                       lutFilterNameString, fitBandString, notFitBandString):
+        """
+        Make the parameter persistence schema
+
+        Parameters
+        ----------
+        parInfo: `np.ndarray`
+           Parameter information returned by fgcm
+        pars: `np.ndarray`
+           Parameter values returned by fgcm
+        parSuperStarFlat: `np.array`
+           Superstar flat values returned by fgcm
+        lutFilterNameString: `str`
+           Combined string of all the lutFilterNames
+        fitBandString: `str`
+           Combined string of all the fitBands
+        notFitBandString: `str`
+           Combined string of all the bands not used in the fit
+
+        Returns
+        -------
+        parSchema: `afwTable.schema`
+        """
+
+        parSchema = afwTable.Schema()
+
+        # parameter info section
+        parSchema.addField('nCcd', type=np.int32, doc='Number of CCDs')
+        parSchema.addField('lutFilterNames', type=str, doc='LUT Filter names in parameter file',
+                           size=len(lutFilterNameString))
+        parSchema.addField('fitBands', type=str, doc='Bands that were fit',
+                           size=len(fitBandString))
+        parSchema.addField('notFitBands', type=str, doc='Bands that were not fit',
+                           size=len(notFitBandString))
+        parSchema.addField('lnTauUnit', type=np.float64, doc='Step units for ln(AOD)')
+        parSchema.addField('lnTauSlopeUnit', type=np.float64,
+                           doc='Step units for ln(AOD) slope')
+        parSchema.addField('alphaUnit', type=np.float64, doc='Step units for alpha')
+        parSchema.addField('pwvUnit', type=np.float64, doc='Step units for pwv')
+        parSchema.addField('pwvPerSlopeUnit', type=np.float64,
+                           doc='Step units for PWV percent slope')
+        parSchema.addField('pwvGlobalUnit', type=np.float64,
+                           doc='Step units for global PWV parameters')
+        parSchema.addField('o3Unit', type=np.float64, doc='Step units for O3')
+        parSchema.addField('qeSysUnit', type=np.float64, doc='Step units for mirror gray')
+        parSchema.addField('qeSysSlopeUnit', type=np.float64, doc='Step units for mirror gray slope')
+        parSchema.addField('hasExternalPwv', type=np.int32, doc='Parameters fit using external pwv')
+        parSchema.addField('hasExternalTau', type=np.int32, doc='Parameters fit using external tau')
+
+        # parameter section
+        parSchema.addField('parAlpha', type='ArrayD', doc='Alpha parameter vector',
+                           size=pars['PARALPHA'].size)
+        parSchema.addField('parO3', type='ArrayD', doc='O3 parameter vector',
+                           size=pars['PARO3'].size)
+        parSchema.addField('parLnTauIntercept', type='ArrayD',
+                           doc='ln(Tau) intercept parameter vector',
+                           size=pars['PARLNTAUINTERCEPT'].size)
+        parSchema.addField('parLnTauSlope', type='ArrayD',
+                           doc='ln(Tau) slope parameter vector',
+                           size=pars['PARLNTAUSLOPE'].size)
+        parSchema.addField('parPwvIntercept', type='ArrayD', doc='PWV intercept parameter vector',
+                           size=pars['PARPWVINTERCEPT'].size)
+        parSchema.addField('parPwvPerSlope', type='ArrayD', doc='PWV percent slope parameter vector',
+                           size=pars['PARPWVPERSLOPE'].size)
+        parSchema.addField('parQeSysIntercept', type='ArrayD', doc='Mirror gray intercept parameter vector',
+                           size=pars['PARQESYSINTERCEPT'].size)
+        parSchema.addField('parQeSysSlope', type='ArrayD', doc='Mirror gray slope parameter vector',
+                           size=pars['PARQESYSSLOPE'].size)
+        parSchema.addField('parRetrievedPwvScale', type=np.float64,
+                           doc='Global scale for retrieved PWV')
+        parSchema.addField('parRetrievedPwvOffset', type=np.float64,
+                           doc='Global offset for retrieved PWV')
+        parSchema.addField('parRetrievedPwvNightlyOffset', type='ArrayD',
+                           doc='Nightly offset for retrieved PWV',
+                           size=pars['PARRETRIEVEDPWVNIGHTLYOFFSET'].size)
+        parSchema.addField('compAperCorrPivot', type='ArrayD', doc='Aperture correction pivot',
+                           size=pars['COMPAPERCORRPIVOT'].size)
+        parSchema.addField('compAperCorrSlope', type='ArrayD', doc='Aperture correction slope',
+                           size=pars['COMPAPERCORRSLOPE'].size)
+        parSchema.addField('compAperCorrSlopeErr', type='ArrayD', doc='Aperture correction slope error',
+                           size=pars['COMPAPERCORRSLOPEERR'].size)
+        parSchema.addField('compAperCorrRange', type='ArrayD', doc='Aperture correction range',
+                           size=pars['COMPAPERCORRRANGE'].size)
+        parSchema.addField('compModelErrExptimePivot', type='ArrayD', doc='Model error exptime pivot',
+                           size=pars['COMPMODELERREXPTIMEPIVOT'].size)
+        parSchema.addField('compModelErrFwhmPivot', type='ArrayD', doc='Model error fwhm pivot',
+                           size=pars['COMPMODELERRFWHMPIVOT'].size)
+        parSchema.addField('compModelErrSkyPivot', type='ArrayD', doc='Model error sky pivot',
+                           size=pars['COMPMODELERRSKYPIVOT'].size)
+        parSchema.addField('compModelErrPars', type='ArrayD', doc='Model error parameters',
+                           size=pars['COMPMODELERRPARS'].size)
+        parSchema.addField('compExpGray', type='ArrayD', doc='Computed exposure gray',
+                           size=pars['COMPEXPGRAY'].size)
+        parSchema.addField('compVarGray', type='ArrayD', doc='Computed exposure variance',
+                           size=pars['COMPVARGRAY'].size)
+        parSchema.addField('compNGoodStarPerExp', type='ArrayI',
+                           doc='Computed number of good stars per exposure',
+                           size=pars['COMPNGOODSTARPEREXP'].size)
+        parSchema.addField('compSigFgcm', type='ArrayD', doc='Computed sigma_fgcm',
+                           size=pars['COMPSIGFGCM'].size)
+        parSchema.addField('compRetrievedPwv', type='ArrayD', doc='Retrieved PWV (smoothed)',
+                           size=pars['COMPRETRIEVEDPWV'].size)
+        parSchema.addField('compRetrievedPwvRaw', type='ArrayD', doc='Retrieved PWV (raw)',
+                           size=pars['COMPRETRIEVEDPWVRAW'].size)
+        parSchema.addField('compRetrievedPwvFlag', type='ArrayI', doc='Retrieved PWV Flag',
+                           size=pars['COMPRETRIEVEDPWVFLAG'].size)
+        parSchema.addField('compRetrievedTauNight', type='ArrayD', doc='Retrieved tau (per night)',
+                           size=pars['COMPRETRIEVEDTAUNIGHT'].size)
+        # superstarflat section
+        parSchema.addField('superstarSize', type='ArrayI', doc='Superstar matrix size',
+                           size=4)
+        parSchema.addField('superstar', type='ArrayD', doc='Superstar matrix (flattened)',
+                           size=parSuperStarFlat.size)
+
+        return parSchema
+
+    def _fillParCatalog(self, parCat, parInfo, pars,
+                        parSuperStarFlat, lutFilterNameString, fitBandString,
+                        notFitBandString):
+        """
+        Fill the parameter catalog
+
+        Parameters
+        ----------
+        parCat: `afwTable.BasicCatalog`
+           Parameter catalog for persistence
+        pars: `np.ndarray`
+           FGCM parameter output
+        parSuperStarFlat: `np.array`
+           FGCM superstar flat array
+        lutFilterNameString: `str`
+           Combined string of all the lutFilterNames
+        fitBandString: `str`
+           Combined string of all the fitBands
+        notFitBandString: `str`
+           Combined string of all the bands not used in the fit
+        """
+
+        rec = parCat.addNew()
+
+        # info section
+        rec['nCcd'] = parInfo['NCCD']
+        rec['lutFilterNames'] = lutFilterNameString
+        rec['fitBands'] = fitBandString
+        rec['notFitBands'] = notFitBandString
+        rec['lnTauUnit'] = parInfo['LNTAUUNIT']
+        rec['lnTauSlopeUnit'] = parInfo['LNTAUSLOPEUNIT']
+        rec['alphaUnit'] = parInfo['ALPHAUNIT']
+        rec['pwvUnit'] = parInfo['PWVUNIT']
+        rec['pwvPerSlopeUnit'] = parInfo['PWVPERSLOPEUNIT']
+        rec['pwvGlobalUnit'] = parInfo['PWVGLOBALUNIT']
+        rec['o3Unit'] = parInfo['O3UNIT']
+        rec['qeSysUnit'] = parInfo['QESYSUNIT']
+        rec['qeSysSlopeUnit'] = parInfo['QESYSSLOPEUNIT']
+        # note these are not currently supported here.
+        rec['hasExternalPwv'] = 0
+        rec['hasExternalTau'] = 0
+
+        # parameter section
+
+        scalarNames = ['parRetrievedPwvScale', 'parRetrievedPwvOffset']
+
+        arrNames = ['parAlpha', 'parO3', 'parLnTauIntercept', 'parLnTauSlope',
+                    'parPwvIntercept', 'parPwvPerSlope', 'parQeSysIntercept',
+                    'parQeSysSlope', 'parRetrievedPwvNightlyOffset', 'compAperCorrPivot',
+                    'compAperCorrSlope', 'compAperCorrSlopeErr', 'compAperCorrRange',
+                    'compModelErrExptimePivot', 'compModelErrFwhmPivot',
+                    'compModelErrSkyPivot', 'compModelErrPars',
+                    'compExpGray', 'compVarGray', 'compNGoodStarPerExp', 'compSigFgcm',
+                    'compRetrievedPwv', 'compRetrievedPwvRaw', 'compRetrievedPwvFlag',
+                    'compRetrievedTauNight']
+
+        for scalarName in scalarNames:
+            rec[scalarName] = pars[scalarName.upper()]
+
+        for arrName in arrNames:
+            rec[arrName][:] = np.atleast_1d(pars[0][arrName.upper()])[:]
+
+        # superstar section
+        rec['superstarSize'][:] = parSuperStarFlat.shape
+        rec['superstar'][:] = parSuperStarFlat.flatten()
+
+    def _makeFlagStarSchema(self):
+        """
+        Make the flagged-stars schema
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        flagStarSchema: `afwTable.schema`
+        """
+
+        flagStarSchema = afwTable.Schema()
+
+        flagStarSchema.addField('objId', type=np.int32, doc='FGCM object id')
+        flagStarSchema.addField('objFlag', type=np.int32, doc='FGCM object flag')
+
+        return flagStarSchema
+
+    def _makeFlagStarCat(self, flagStarSchema, flagStarStruct):
+        """
+        Make the flagged star catalog
+
+        Parameters
+        ----------
+        flagStarSchema: `afwTable.schema`
+           Flagged star schema
+        flagStarStruct: `np.ndarray`
+           Flagged star structure from fgcm
+
+        Returns
+        -------
+        flagStarCat: `afwTable.BaseCatalog`
+           Flagged star catalog for persistence
+        """
+
+        flagStarCat = afwTable.BaseCatalog(flagStarSchema)
+        flagStarCat.reserve(flagStarStruct.size)
+        for i in range(flagStarStruct.size):
+            flagStarCat.addNew()
+
+        if not flagStarCat.isContiguous():
+            flagStarCat = flagStarCat.copy(deep=True)
+
+        flagStarCat['objId'][:] = flagStarStruct['OBJID']
+        flagStarCat['objFlag'][:] = flagStarStruct['OBJFLAG']
+
+        return flagStarCat
+
+    def _makeZptSchema(self, chebyshevSize):
+        """
+        Make the zeropoint schema
+
+        Parameters
+        ----------
+        chebyshevSize: `int`
+           Length of the zeropoint chebyshev array
+
+        Returns
+        -------
+        zptSchema: `afwTable.schema`
+        """
+
+        zptSchema = afwTable.Schema()
+
+        zptSchema.addField('visit', type=np.int32, doc='Visit number')
+        zptSchema.addField('ccd', type=np.int32, doc='CCD number')
+        zptSchema.addField('fgcmFlag', type=np.int32, doc='FGCM flag value')
+        zptSchema.addField('fgcmZpt', type=np.float32, doc='FGCM zeropoint (center of CCD)')
+        zptSchema.addField('fgcmZptErr', type=np.float32,
+                           doc='Error on zeropoint, estimated from repeatability + number of obs')
+        if self.config.superStarSubCcd:
+            zptSchema.addField('fgcmfZptCheb', type='ArrayD',
+                               size=chebyshevSize,
+                               doc='Chebyshev parameters (flattened) for zeropoint')
+            zptSchema.addField('fgcmfZptChebXyMax', type='ArrayD', size=2,
+                               doc='maximum x/maximum y to scale to apply chebyshev parameters')
+        zptSchema.addField('fgcmI0', type=np.float32, doc='Integral of the passband')
+        zptSchema.addField('fgcmI10', type=np.float32, doc='Normalized chromatic integral')
+        zptSchema.addField('fgcmR0', type=np.float32,
+                           doc='Retrieved i0 integral, estimated from stars (only for flag 1)')
+        zptSchema.addField('fgcmR10', type=np.float32,
+                           doc='Retrieved i10 integral, estimated from stars (only for flag 1)')
+        zptSchema.addField('fgcmGry', type=np.float32,
+                           doc='Estimated gray extinction relative to atmospheric solution; '
+                           'only for flag <= 4')
+        zptSchema.addField('fgcmZptVar', type=np.float32, doc='Variance of zeropoint over ccd')
+        zptSchema.addField('fgcmTilings', type=np.float32,
+                           doc='Number of photometric tilings used for solution for ccd')
+        zptSchema.addField('fgcmFpGry', type=np.float32,
+                           doc='Average gray extinction over the full focal plane '
+                           '(same for all ccds in a visit)')
+        zptSchema.addField('fgcmFpVar', type=np.float32,
+                           doc='Variance of gray extinction over the full focal plane '
+                           '(same for all ccds in a visit)')
+        zptSchema.addField('fgcmDust', type=np.float32,
+                           doc='Gray dust extinction from the primary/corrector'
+                           'at the time of the exposure')
+        zptSchema.addField('fgcmFlat', type=np.float32, doc='Superstarflat illumination correction')
+        zptSchema.addField('fgcmAperCorr', type=np.float32, doc='Aperture correction estimated by fgcm')
+        zptSchema.addField('exptime', type=np.float32, doc='Exposure time')
+        zptSchema.addField('filtername', type=str, size=2, doc='Filter name')
+
+        return zptSchema
+
+    def _makeZptCat(self, zptSchema, zpStruct):
+        """
+        Make the zeropoint catalog
+
+        Parameters
+        ----------
+        zptSchema: `afwTable.schema`
+           Zeropoint catalog schema
+        zpStruct: `np.ndarray`
+           Zeropoint structure from fgcm
+
+        Returns
+        -------
+        zptCat: `afwTable.BaseCatalog`
+           Zeropoint catalog for persistence
+        """
+
+        zptCat = afwTable.BaseCatalog(zptSchema)
+        zptCat.reserve(zpStruct.size)
+
+        for filterName in zpStruct['FILTERNAME']:
+            rec = zptCat.addNew()
+            rec['filtername'] = filterName.decode('utf-8')
+
+        if not zptCat.isContiguous():
+            zptCat = zptCat.copy(deep=True)
+
+        zptCat['visit'][:] = zpStruct['VISIT']
+        zptCat['ccd'][:] = zpStruct['CCD']
+        zptCat['fgcmFlag'][:] = zpStruct['FGCM_FLAG']
+        zptCat['fgcmZpt'][:] = zpStruct['FGCM_ZPT']
+        zptCat['fgcmZptErr'][:] = zpStruct['FGCM_ZPTERR']
+        if self.config.superStarSubCcd:
+            zptCat['fgcmfZptCheb'][:, :] = zpStruct['FGCM_FZPT_CHEB']
+            zptCat['fgcmfZptChebXyMax'][:, :] = zpStruct['FGCM_FZPT_CHEB_XYMAX']
+        zptCat['fgcmI0'][:] = zpStruct['FGCM_I0']
+        zptCat['fgcmI10'][:] = zpStruct['FGCM_I10']
+        zptCat['fgcmR0'][:] = zpStruct['FGCM_R0']
+        zptCat['fgcmR10'][:] = zpStruct['FGCM_R10']
+        zptCat['fgcmGry'][:] = zpStruct['FGCM_GRY']
+        zptCat['fgcmZptVar'][:] = zpStruct['FGCM_ZPTVAR']
+        zptCat['fgcmTilings'][:] = zpStruct['FGCM_TILINGS']
+        zptCat['fgcmFpGry'][:] = zpStruct['FGCM_FPGRY']
+        zptCat['fgcmFpVar'][:] = zpStruct['FGCM_FPVAR']
+        zptCat['fgcmDust'][:] = zpStruct['FGCM_DUST']
+        zptCat['fgcmFlat'][:] = zpStruct['FGCM_FLAT']
+        zptCat['fgcmAperCorr'][:] = zpStruct['FGCM_APERCORR']
+        zptCat['exptime'][:] = zpStruct['EXPTIME']
+
+        return zptCat
+
+    def _makeAtmSchema(self):
+        """
+        Make the atmosphere schema
+
+        Returns
+        -------
+        atmSchema: `afwTable.schema`
+        """
+
+        atmSchema = afwTable.Schema()
+
+        atmSchema.addField('visit', type=np.int32, doc='Visit number')
+        atmSchema.addField('pmb', type=np.float64, doc='Barometric pressure (mb)')
+        atmSchema.addField('pwv', type=np.float64, doc='Water vapor (mm)')
+        atmSchema.addField('tau', type=np.float64, doc='Aerosol optical depth')
+        atmSchema.addField('alpha', type=np.float64, doc='Aerosol slope')
+        atmSchema.addField('o3', type=np.float64, doc='Ozone (dobson)')
+        atmSchema.addField('secZenith', type=np.float64, doc='Secant(zenith) (~ airmass)')
+
+        return atmSchema
+
+    def _makeAtmCat(self, atmSchema, atmStruct):
+        """
+        Make the atmosphere catalog
+
+        Parameters
+        ----------
+        atmSchema: `afwTable.schema`
+           Atmosphere catalog schema
+        atmStruct: `np.ndarray`
+           Atmosphere structure from fgcm
+
+        Returns
+        -------
+        atmCat: `afwTable.BaseCatalog`
+           Atmosphere catalog for persistence
+        """
+
+        atmCat = afwTable.BaseCatalog(atmSchema)
+        atmCat.reserve(atmStruct.size)
+        for i in range(atmStruct.size):
+            atmCat.addNew()
+
+        if not atmCat.isContiguous():
+            atmCat = atmCat.copy(deep=True)
+
+        atmCat['visit'][:] = atmStruct['VISIT']
+        atmCat['pmb'][:] = atmStruct['PMB']
+        atmCat['pwv'][:] = atmStruct['PWV']
+        atmCat['tau'][:] = atmStruct['TAU']
+        atmCat['alpha'][:] = atmStruct['ALPHA']
+        atmCat['o3'][:] = atmStruct['O3']
+        atmCat['secZenith'][:] = atmStruct['SECZENITH']
+
+        return atmCat
+
+    def _makeStdSchema(self):
+        """
+        Make the standard star schema
+
+        Returns
+        -------
+        stdSchema: `afwTable.schema`
+        """
+
+        stdSchema = afwTable.SimpleTable.makeMinimalSchema()
+        stdSchema.addField('ngood', type='ArrayI', doc='Number of good observations',
+                           size=len(self.config.bands))
+        stdSchema.addField('mag_std_noabs', type='ArrayF',
+                           doc='Standard magnitude (no absolute calibration)',
+                           size=len(self.config.bands))
+        stdSchema.addField('magErr_std', type='ArrayF',
+                           doc='Standard magnitude error',
+                           size=len(self.config.bands))
+
+        return stdSchema
+
+    def _makeStdCat(self, stdSchema, stdStruct):
+        """
+        Make the standard star catalog
+
+        Parameters
+        ----------
+        stdSchema: `afwTable.schema`
+           Standard star catalog schema
+        stdStruct: `np.ndarray`
+           Standard star structure in FGCM format
+
+        Returns
+        -------
+        stdCat: `afwTable.BaseCatalog`
+           Standard star catalog for persistence
+        """
+
+        stdCat = afwTable.SimpleCatalog(stdSchema)
+
+        stdCat.reserve(stdStruct.size)
+        for i in range(stdStruct.size):
+            stdCat.addNew()
+
+        # Sometimes the reserve doesn't actually make a contiguous catalog (sigh)
+        if not stdCat.isContiguous():
+            stdCat = stdCat.copy(deep=True)
+
+        stdCat['id'][:] = stdStruct['FGCM_ID']
+        stdCat['coord_ra'][:] = stdStruct['RA'] * lsst.geom.degrees
+        stdCat['coord_dec'][:] = stdStruct['DEC'] * lsst.geom.degrees
+        stdCat['ngood'][:, :] = stdStruct['NGOOD'][:, :]
+        stdCat['mag_std_noabs'][:, :] = stdStruct['MAG_STD'][:, :]
+        stdCat['magErr_std'][:, :] = stdStruct['MAGERR_STD'][:, :]
+
+        return stdCat

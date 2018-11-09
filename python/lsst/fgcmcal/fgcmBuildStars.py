@@ -704,9 +704,9 @@ class FgcmBuildStarsTask(pipeBase.CmdLineTask):
         # FIXME: should be angle?
         objSchema.addField('ra', type=np.float64, doc='Mean object RA')
         objSchema.addField('dec', type=np.float64, doc='Mean object Dec')
-        objSchema.addField('obsarrindex', type=np.int32,
+        objSchema.addField('obsArrIndex', type=np.int32,
                            doc='Index in obsIndexTable for first observation')
-        objSchema.addField('nobs', type=np.int32, doc='Total number of observations')
+        objSchema.addField('nObs', type=np.int32, doc='Total number of observations')
 
         # make catalog and records
         fgcmStarIdCat = afwTable.BaseCatalog(objSchema)
@@ -718,21 +718,21 @@ class FgcmBuildStarsTask(pipeBase.CmdLineTask):
         fgcmStarIdCat['fgcm_id'][:] = fgcmMakeStars.objIndexCat['fgcm_id']
         fgcmStarIdCat['ra'][:] = fgcmMakeStars.objIndexCat['ra']
         fgcmStarIdCat['dec'][:] = fgcmMakeStars.objIndexCat['dec']
-        fgcmStarIdCat['obsarrindex'][:] = fgcmMakeStars.objIndexCat['obsarrindex']
-        fgcmStarIdCat['nobs'][:] = fgcmMakeStars.objIndexCat['nobs']
+        fgcmStarIdCat['obsArrIndex'][:] = fgcmMakeStars.objIndexCat['obsarrindex']
+        fgcmStarIdCat['nObs'][:] = fgcmMakeStars.objIndexCat['nobs']
 
         butler.put(fgcmStarIdCat, 'fgcmStarIds')
 
         # afwTable for observation indices
         obsSchema = afwTable.Schema()
-        obsSchema.addField('obsindex', type=np.int32, doc='Index in observation table')
+        obsSchema.addField('obsIndex', type=np.int32, doc='Index in observation table')
 
         fgcmStarIndicesCat = afwTable.BaseCatalog(obsSchema)
         fgcmStarIndicesCat.table.preallocate(fgcmMakeStars.obsIndexCat.size)
         for i in range(fgcmMakeStars.obsIndexCat.size):
             fgcmStarIndicesCat.addNew()
 
-        fgcmStarIndicesCat['obsindex'][:] = fgcmMakeStars.obsIndexCat['obsindex']
+        fgcmStarIndicesCat['obsIndex'][:] = fgcmMakeStars.obsIndexCat['obsindex']
 
         butler.put(fgcmStarIndicesCat, 'fgcmStarIndices')
 

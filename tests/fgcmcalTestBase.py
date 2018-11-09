@@ -143,7 +143,7 @@ class FgcmcalTestBase(object):
 
         self.assertEqual(nZp, len(zps))
 
-        gd, = np.where(zps['fgcmflag'] == 1)
+        gd, = np.where(zps['fgcmFlag'] == 1)
         self.assertEqual(nGoodZp, len(gd))
 
         stds = butler.get('fgcmStandardStars', fgcmcycle=0)
@@ -195,14 +195,14 @@ class FgcmcalTestBase(object):
 
         mag = rawStars['mag_std_noabs'][0, 0] + offsets[0]
         flux = afwImage.fluxFromABMag(mag)
-        fluxErr = afwImage.fluxErrFromABMagErr(rawStars['magerr_std'][0, 0], mag)
+        fluxErr = afwImage.fluxErrFromABMagErr(rawStars['magErr_std'][0, 0], mag)
         self.assertFloatsAlmostEqual(flux, refStruct.refCat['r_flux'][test[0]], rtol=1e-6)
         self.assertFloatsAlmostEqual(fluxErr, refStruct.refCat['r_fluxErr'][test[0]], rtol=1e-6)
 
         # Test the joincal_photoCalib output
 
         zptCat = butler.get('fgcmZeropoints', fgcmcycle=0)
-        selected = (zptCat['fgcmflag'] < 16)
+        selected = (zptCat['fgcmFlag'] < 16)
 
         # Read in all the calibrations, these should all be there
         for rec in zptCat[selected]:
@@ -229,7 +229,7 @@ class FgcmcalTestBase(object):
         # and doesn't know about that yet)
         testZpInd, = np.where((zptCat['visit'] == testVisit) &
                               (zptCat['ccd'] == testCcd))
-        fgcmZpt = zptCat['fgcmzpt'][testZpInd] + offsets[testBandIndex]
+        fgcmZpt = zptCat['fgcmZpt'][testZpInd] + offsets[testBandIndex]
 
         # This is the magnitude through the mean calibration
         photoCalMeanCalMags = np.zeros(gdSrc.sum())
@@ -262,20 +262,20 @@ class FgcmcalTestBase(object):
         testTrans = butler.get('transmission_atmosphere_fgcm',
                                dataId={visitDataRefName: visitCatalog[0]['visit']})
         testResp = testTrans.sampleAt(position=afwGeom.Point2D(0, 0),
-                                      wavelengths=lutCat[0]['atmlambda'])
+                                      wavelengths=lutCat[0]['atmLambda'])
 
         # The fit to be roughly consistent with the standard, although the
         # airmass is taken into account even with the "frozen" atmosphere.
         # This is also a rough comparison, because the interpolation does
         # not work well with such a coarse look-up table used for the test.
-        self.assertFloatsAlmostEqual(testResp, lutCat[0]['atmstdtrans'], atol=0.06)
+        self.assertFloatsAlmostEqual(testResp, lutCat[0]['atmStdTrans'], atol=0.06)
 
         # The second should be close to the first, but there is the airmass
         # difference so they aren't identical
         testTrans2 = butler.get('transmission_atmosphere_fgcm',
                                 dataId={visitDataRefName: visitCatalog[1]['visit']})
         testResp2 = testTrans2.sampleAt(position=afwGeom.Point2D(0, 0),
-                                        wavelengths=lutCat[0]['atmlambda'])
+                                        wavelengths=lutCat[0]['atmLambda'])
         self.assertFloatsAlmostEqual(testResp, testResp2, atol=1e-4)
 
     def _checkResult(self, result):
