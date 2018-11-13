@@ -34,7 +34,8 @@ from lsst.afw.image import Filter
 
 import fgcm
 
-__all__ = ['FgcmMakeLutParametersConfig', 'FgcmMakeLutConfig', 'FgcmMakeLutTask']
+__all__ = ['FgcmMakeLutParametersConfig', 'FgcmMakeLutConfig', 'FgcmMakeLutTask',
+           'FgcmMakeLutRunner']
 
 
 class FgcmMakeLutParametersConfig(pexConfig.Config):

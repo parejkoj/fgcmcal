@@ -35,7 +35,7 @@ import lsst.geom
 
 import fgcm
 
-__all__ = ['FgcmFitCycleConfig', 'FgcmFitCycleTask']
+__all__ = ['FgcmFitCycleConfig', 'FgcmFitCycleTask', 'FgcmFitCycleRunner']
 
 
 class FgcmFitCycleConfig(pexConfig.Config):
@@ -47,17 +47,22 @@ class FgcmFitCycleConfig(pexConfig.Config):
         default=("NO_DATA",),
     )
     fitFlag = pexConfig.ListField(
-        doc="Flag for bands to fit",
+        doc=("Flag for which bands are directly constrained in the FGCM fit. "
+             "Bands set to 0 will have the atmosphere constrained from observations "
+             "in other bands on the same night."),
         dtype=int,
         default=(0,),
     )
     requiredFlag = pexConfig.ListField(
-        doc="Flag for bands to require to be a calibration star",
+        doc=("Flag for which bands are required for a star to be considered a calibration "
+             "star in the FGCM fit.  Typically this should be the same as fitFlag."),
         dtype=int,
         default=(0,),
     )
     filterToBand = pexConfig.DictField(
-        doc="filterName to band mapping",
+        doc=("Dictionary to map filterName (e.g. physical filter) to band (e.g. abstract filter). "
+             "With this mapping different filters (e.g. HSC r and r2) can be calibrated to the same "
+             "'r' band."),
         keytype=str,
         itemtype=str,
         default={},
@@ -108,7 +113,8 @@ class FgcmFitCycleConfig(pexConfig.Config):
         default=5.0,
     )
     cycleNumber = pexConfig.Field(
-        doc="Fit Cycle Number",
+        doc=("FGCM fit cycle number.  This is automatically incremented after each run "
+             "and stage of outlier rejection.  See cookbook for details."),
         dtype=int,
         default=None,
     )
@@ -142,6 +148,7 @@ class FgcmFitCycleConfig(pexConfig.Config):
         dtype=float,
         default=None,
     )
+    # TODO: DM-16490 will make this unneccessary
     pixelScale = pexConfig.Field(
         doc="Pixel scale (arcsec/pixel) (temporary)",
         dtype=float,
@@ -153,47 +160,56 @@ class FgcmFitCycleConfig(pexConfig.Config):
         default=0.15,
     )
     minStarPerCcd = pexConfig.Field(
-        doc="Minimum number of good stars per CCD for calibration",
+        doc=("Minimum number of good stars per CCD to be used in calibration fit. "
+             "CCDs with fewer stars will have their calibration estimated from other "
+             "CCDs in the same visit, with zeropoint error increased accordingly."),
         dtype=int,
         default=5,
     )
     minCcdPerExp = pexConfig.Field(
-        doc="Minimum number of good CCDs per exposure",
+        doc=("Minimum number of good CCDs per exposure/visit to be used in calibration fit. "
+             "Visits with fewer good CCDs will have CCD zeropoints estimated where possible."),
         dtype=int,
         default=5,
     )
     maxCcdGrayErr = pexConfig.Field(
-        doc="Maximum error on CCD gray offset to be considered good",
+        doc="Maximum error on CCD gray offset to be considered photometric",
         dtype=float,
         default=0.05,
     )
     minStarPerExp = pexConfig.Field(
-        doc="Minimum number of good stars per exposure to be considered good",
+        doc=("Minimum number of good stars per exposure/visit to be used in calibration fit. "
+             "Visits with fewer good stars will have CCD zeropoints estimated where possible."),
         dtype=int,
         default=600,
     )
     minExpPerNight = pexConfig.Field(
-        doc="Minimum number of good exposures to consider a good night",
+        doc="Minimum number of good exposures/visits to consider a partly photometric night",
         dtype=int,
         default=10,
     )
     expGrayInitialCut = pexConfig.Field(
-        doc="Maximum exposure gray value for initial cut",
+        doc=("Maximum exposure/visit gray value for initial selection of possible photometric "
+             "observations."),
         dtype=float,
         default=-0.25,
     )
     expGrayPhotometricCut = pexConfig.ListField(
-        doc="Negative exposure gray cut for photometric selection",
+        doc=("Maximum (negative) exposure gray for a visit to be considered photometric. "
+             "There will be one value per band."),
         dtype=float,
         default=(0.0,),
     )
     expGrayHighCut = pexConfig.ListField(
-        doc="Positive exposure gray cut for photometric selection",
+        doc=("Maximum (positive) exposure gray for a visit to be considered photometric. "
+             "There will be one value per band."),
         dtype=float,
         default=(0.0,),
     )
     expGrayRecoverCut = pexConfig.Field(
-        doc="Maximum exposure gray to be able to recover bad ccds",
+        doc=("Maximum (negative) exposure gray to be able to recover bad ccds via interpolation. "
+             "Visits with more gray extinction will only get CCD zeropoints if there are "
+             "sufficient star observations (minStarPerCcd) on that CCD."),
         dtype=float,
         default=-1.0,
     )
@@ -203,7 +219,9 @@ class FgcmFitCycleConfig(pexConfig.Config):
         default=0.0005,
     )
     expGrayErrRecoverCut = pexConfig.Field(
-        doc="Maximum exposure gray error to be able to recover bad ccds",
+        doc=("Maximum exposure gray error to be able to recover bad ccds via interpolation. "
+             "Visits with more gray variance will only get CCD zeropoints if there are "
+             "sufficient star observations (minStarPerCcd) on that CCD."),
         dtype=float,
         default=0.05,
     )
@@ -262,18 +280,6 @@ class FgcmFitCycleConfig(pexConfig.Config):
         dtype=int,
         default=256,
     )
-    varNSig = pexConfig.Field(
-        doc="Number of sigma to be tested as a variable",
-        dtype=float,
-        # Default recommendation in FGCM is to set this very large to
-        # turn off the variable detection
-        default=100.0,
-    )
-    varMinBand = pexConfig.Field(
-        doc="Minimum number of bands with variability to be flagged as variable",
-        dtype=int,
-        default=2,
-    )
     cameraGain = pexConfig.Field(
         doc="Gain value for the typical CCD",
         dtype=float,
@@ -315,8 +321,9 @@ class FgcmFitCycleRunner(pipeBase.ButlerInitializedTaskRunner):
     fgcmFitCycleTask.run() takes one argument, the butler, and uses
     stars and visits previously extracted from dataRefs by
     fgcmBuildStars.
-    This runner does not use any parallelization, although the
-    FGCM code uses multiprocessing
+    This Runner does not perform any dataRef parallelization, but the FGCM
+    code called by the Task uses python multiprocessing (see the "ncores"
+    config option).
     """
 
     @staticmethod
@@ -325,9 +332,6 @@ class FgcmFitCycleRunner(pipeBase.ButlerInitializedTaskRunner):
         Return a list with one element, the butler.
         """
         return [parsedCmd.butler]
-
-    # This overrides the pipe_base config saving which would fail because it
-    # requires the %(fgcmcycle)d dataId key.
 
     def __call__(self, butler):
         """
@@ -403,14 +407,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
         pipeBase.CmdLineTask.__init__(self, **kwargs)
 
-    @classmethod
-    def _makeArgumentParser(cls):
-        """Create an argument parser"""
-
-        parser = pipeBase.ArgumentParser(name=cls._DefaultName)
-
-        return parser
-
     # no saving of metadata for now
     def _getMetadataName(self):
         return None
@@ -482,30 +478,9 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         ----------
         butler: `lsst.daf.persistence.Butler`
            (used for mapper information)
-
         """
 
-        if not butler.datasetExists('fgcmVisitCatalog'):
-            raise RuntimeError("Could not find fgcmVisitCatalog in repo!")
-        if not butler.datasetExists('fgcmStarObservations'):
-            raise RuntimeError("Could not find fgcmStarObservations in repo!")
-        if not butler.datasetExists('fgcmStarIds'):
-            raise RuntimeError("Could not find fgcmStarIds in repo!")
-        if not butler.datasetExists('fgcmStarIndices'):
-            raise RuntimeError("Could not find fgcmStarIndices in repo!")
-        if not butler.datasetExists('fgcmLookUpTable'):
-            raise RuntimeError("Could not find fgcmLookUpTable in repo!")
-
-        # Need additional datasets if we are not the initial cycle
-        if (self.config.cycleNumber > 0):
-            if not butler.datasetExists('fgcmFitParameters',
-                                        fgcmcycle=self.config.cycleNumber-1):
-                raise RuntimeError("Could not find fgcmFitParameters for previous cycle (%d) in repo!" %
-                                   (self.config.cycleNumber-1))
-            if not butler.datasetExists('fgcmFlaggedStars',
-                                        fgcmcycle=self.config.cycleNumber-1):
-                raise RuntimeError("Could not find fgcmFlaggedStars for previous cycle (%d) in repo!" %
-                                   (self.config.cycleNumber-1))
+        self._checkDatasetsExist(butler)
 
         camera = butler.get('camera')
         configDict = self._makeConfigDict(camera)
@@ -561,10 +536,16 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
             flagFlag = None
 
         # match star observations to visits
+        # Only those star observations that match visits from fgcmExpInfo['VISIT'] will
+        # actually be transferred into fgcm using the indexing below.
         visitIndex = np.searchsorted(fgcmExpInfo['VISIT'], starObs['visit'][starIndices['obsIndex']])
 
-        # note that we only need the star observations from specific indices
-
+        # The fgcmStars.loadStars method will copy all the star information into
+        # special shared memory objects that will not blow up the memory usage when
+        # used with python multiprocessing.  Once all the numbers are copied,
+        # it is necessary to release all references to the objects that previously
+        # stored the data to ensure that the garbage collector can clear the memory,
+        # and ensure that this memory is not copied when multiprocessing kicks in.
         fgcmStars.loadStars(fgcmPars,
                             starObs['visit'][starIndices['obsIndex']],
                             starObs['ccd'][starIndices['obsIndex']],
@@ -584,7 +565,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                             flagFlag=flagFlag,
                             computeNobs=True)
 
-        # clear star memory
+        # Release all references to temporary objects holding star data (see above)
         starObs = None
         starIds = None
         starIndices = None
@@ -607,55 +588,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         # Persistance
         ##################
 
-        # parameters
-        parInfo, pars = fgcmFitCycle.fgcmPars.parsToArrays()
-
-        parSchema = afwTable.Schema()
-
-        comma = ','
-        lutFilterNameString = comma.join([n.decode('utf-8')
-                                          for n in parInfo['LUTFILTERNAMES'][0]])
-        fitBandString = comma.join([n.decode('utf-8')
-                                    for n in parInfo['FITBANDS'][0]])
-        notFitBandString = comma.join([n.decode('utf-8')
-                                       for n in parInfo['NOTFITBANDS'][0]])
-
-        parSchema = self._makeParSchema(parInfo, pars, fgcmFitCycle.fgcmPars.parSuperStarFlat,
-                                        lutFilterNameString, fitBandString, notFitBandString)
-        parCat = afwTable.BaseCatalog(parSchema)
-        parCat.reserve(1)
-
-        self._fillParCatalog(parCat, parInfo, pars, fgcmFitCycle.fgcmPars.parSuperStarFlat,
-                             lutFilterNameString, fitBandString, notFitBandString)
-
-        butler.put(parCat, 'fgcmFitParameters', fgcmcycle=self.config.cycleNumber)
-
-        # Save the flagged stars
-        flagStarSchema = self._makeFlagStarSchema()
-        flagStarStruct = fgcmFitCycle.fgcmStars.getFlagStarIndices()
-        flagStarCat = self._makeFlagStarCat(flagStarSchema, flagStarStruct)
-
-        butler.put(flagStarCat, 'fgcmFlaggedStars', fgcmcycle=self.config.cycleNumber)
-
-        # Save the zeropoint information
-        zptSchema = self._makeZptSchema(fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FZPT_CHEB'].shape[1])
-        zptCat = self._makeZptCat(zptSchema, fgcmFitCycle.fgcmZpts.zpStruct)
-
-        butler.put(zptCat, 'fgcmZeropoints', fgcmcycle=self.config.cycleNumber)
-
-        # Save atmosphere values
-
-        atmSchema = self._makeAtmSchema()
-        atmCat = self._makeAtmCat(atmSchema, fgcmFitCycle.fgcmZpts.atmStruct)
-
-        butler.put(atmCat, 'fgcmAtmosphereParameters', fgcmcycle=self.config.cycleNumber)
-
-        if self.config.outputStandards:
-            stdSchema = self._makeStdSchema()
-            stdStruct = fgcmFitCycle.fgcmStars.retrieveStdStarCatalog(fgcmFitCycle.fgcmPars)
-            stdCat = self._makeStdCat(stdSchema, stdStruct)
-
-            butler.put(stdCat, 'fgcmStandardStars', fgcmcycle=self.config.cycleNumber)
+        self._persistFgcmDatasets(butler, fgcmFitCycle)
 
         # Output the config for the next cycle
         # We need to make a copy since the input one has been frozen
@@ -682,8 +615,63 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
             self.log.info("   config.maxIter = 0")
             self.log.info("   config.outputStandards = True")
 
+    def _checkDatasetsExist(self, butler):
+        """
+        Check if necessary datasets exist to run fgcmFitCycle
+
+        Parameters
+        ----------
+        butler: `lsst.daf.persistence.Butler`
+
+        Raises
+        ------
+        RuntimeError
+           If any of fgcmVisitCatalog, fgcmStarObservations, fgcmStarIds,
+           fgcmStarIndices, fgcmLookUpTable datasets do not exist.
+           If cycleNumber > 0, then also checks for fgcmFitParameters,
+           fgcmFlaggedStars.
+        """
+
+        if not butler.datasetExists('fgcmVisitCatalog'):
+            raise RuntimeError("Could not find fgcmVisitCatalog in repo!")
+        if not butler.datasetExists('fgcmStarObservations'):
+            raise RuntimeError("Could not find fgcmStarObservations in repo!")
+        if not butler.datasetExists('fgcmStarIds'):
+            raise RuntimeError("Could not find fgcmStarIds in repo!")
+        if not butler.datasetExists('fgcmStarIndices'):
+            raise RuntimeError("Could not find fgcmStarIndices in repo!")
+        if not butler.datasetExists('fgcmLookUpTable'):
+            raise RuntimeError("Could not find fgcmLookUpTable in repo!")
+
+        # Need additional datasets if we are not the initial cycle
+        if (self.config.cycleNumber > 0):
+            if not butler.datasetExists('fgcmFitParameters',
+                                        fgcmcycle=self.config.cycleNumber-1):
+                raise RuntimeError("Could not find fgcmFitParameters for previous cycle (%d) in repo!" %
+                                   (self.config.cycleNumber-1))
+            if not butler.datasetExists('fgcmFlaggedStars',
+                                        fgcmcycle=self.config.cycleNumber-1):
+                raise RuntimeError("Could not find fgcmFlaggedStars for previous cycle (%d) in repo!" %
+                                   (self.config.cycleNumber-1))
+
     def _loadFgcmLut(self, butler, filterToBand=None):
         """
+        Load the FGCM look-up-table
+
+        Parameters
+        ----------
+        butler: `lsst.daf.persistence.Butler`
+        filterToBand: `dict`
+           Dictionary mapping filters to bands (see self.config.filterToBand)
+
+        Returns
+        -------
+        fgcmLut: `lsst.fgcm.FgcmLut`
+           Lookup table for FGCM
+        lutIndexVals: `np.ndarray`
+           Numpy array with LUT index information for FGCM
+        lutStd: `np.ndarray`
+           Numpy array with LUT standard throughput values for FGCM
         """
 
         # set up the look-up-table
@@ -694,7 +682,8 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         lutFilterNames = np.array(lutCat[0]['filterNames'].split(','), dtype='a')
         lutStdFilterNames = np.array(lutCat[0]['stdFilterNames'].split(','), dtype='a')
 
-        # FIXME: check that lutBands equal listed bands!
+        # Note that any discrepancies between config values will raise relevant
+        # exceptions in the FGCM code.
 
         lutIndexVals = np.zeros(1, dtype=[('FILTERNAMES', lutFilterNames.dtype.str,
                                            lutFilterNames.size),
@@ -758,9 +747,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         lutStd['ATMLAMBDA'][:] = lutCat[0]['atmLambda'][:]
         lutStd['ATMSTDTRANS'][:] = lutCat[0]['atmStdTrans'][:]
 
-        lutTypes = []
-        for row in lutCat:
-            lutTypes.append(row['luttype'])
+        lutTypes = [row['luttype'] for row in lutCat]
 
         # And the flattened look-up-table
         lutFlat = np.zeros(lutCat[0]['lut'].size, dtype=[('I0', 'f4'),
@@ -791,20 +778,28 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
             # raise a helpful exception
             pass
 
-        # and clear out the memory from the big object
-        lutCat = None
-
+        # The fgcm.FgcmLUT() class copies all the LUT information into special
+        # shared memory objects that will not blow up the memory usage when used
+        # with python multiprocessing.  Once all the numbers are copied, the
+        # references to the temporary objects (lutCat, lutFlat, lutDerivFlat)
+        # will fall out of scope and can be cleaned up by the garbage collector.
         fgcmLut = fgcm.FgcmLUT(lutIndexVals, lutFlat, lutDerivFlat, lutStd,
                                filterToBand=self.config.filterToBand)
-
-        # and clear out the memory of the large temporary objects
-        lutFlat = None
-        lutDerivFlat = None
 
         return fgcmLut, lutIndexVals, lutStd
 
     def _loadVisitCatalog(self, butler):
         """
+        Load the FGCM visit catalog
+
+        Parameters
+        ----------
+        butler: `lsst.daf.persistence.Butler`
+
+        Returns
+        -------
+        fgcmExpInfo: `np.ndarray`
+           Numpy array for visit information for FGCM
         """
 
         # next we need the exposure/visit information
@@ -834,14 +829,25 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         fgcmExpInfo['DELTA_APER'][:] = visitCat['deltaAper']
         fgcmExpInfo['SKYBACKGROUND'][:] = visitCat['skyBackground']
         # Note that we have to go through asAstropy() to get a string
-        #  array out of an afwTable
+        #  array out of an afwTable.  This is faster than a row-by-row loop.
         fgcmExpInfo['FILTERNAME'][:] = visitCat.asAstropy()['filtername']
 
         return fgcmExpInfo
 
     def _loadCcdOffsets(self, butler):
         """
+        Load the CCD offsets in ra/dec and x/y space
+
+        Parameters
+        ----------
+        butler: `lsst.daf.persistence.Butler`
+
+        Returns
+        -------
+        ccdOffsets: `np.ndarray`
+           Numpy array with ccd offset information for input to FGCM
         """
+        # TODO: DM-16490 will simplify and generalize the math.
         camera = butler.get('camera')
 
         # and we need to know the ccd offsets from the camera geometry
@@ -868,8 +874,10 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
             xform = orient.makePixelFpTransform(extent)
             pointXform = xform.applyForward(camPoint)
             # this requires a pixelScale
-            # NOTE that this now works properly with HSC, but I need to work on
-            # generalizing this properly
+            # Note that this now works properly with HSC, but I need to work on
+            # generalizing this properly.  I expect the updates in DM-16490 will
+            # generalize these computations, and appropriate tests can be added
+            # on that ticket.
             ccdOffsets['DELTA_RA'][i] = -pointXform.getY() * self.config.pixelScale / 3600.0
             ccdOffsets['DELTA_DEC'][i] = -pointXform.getX() * self.config.pixelScale / 3600.0
 
@@ -917,6 +925,8 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         else:
             resetParameters = True
 
+        # TODO: Having direct access to the mirror area from the camera would be
+        #  useful.  See DM-16489.
         # Mirror area in cm**2
         mirrorArea = np.pi*(camera.telescopeDiameter*100./2.)**2.
 
@@ -983,8 +993,8 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                       'sigma0Phot': self.config.sigma0Phot,
                       'mapLongitudeRef': self.config.mapLongitudeRef,
                       'mapNSide': self.config.mapNSide,
-                      'varNSig': self.config.varNSig,
-                      'varMinBand': self.config.varMinBand,
+                      'varNSig': 100.0,  # Turn off 'variable star selection' which doesn't work yet
+                      'varMinBand': 2,
                       'useRetrievedPWV': False,
                       'useNightlyRetrievedPWV': False,
                       'pwvRetrievalSmoothBlock': 25,
@@ -1024,8 +1034,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         parFitBands = np.array(parCat[0]['fitBands'].split(','))
         parNotFitBands = np.array(parCat[0]['notFitBands'].split(','))
 
-        # FIXME: check that these are the same as in the config, to be sure
-
         inParInfo = np.zeros(1, dtype=[('NCCD', 'i4'),
                                        ('LUTFILTERNAMES', parLutFilterNames.dtype.str,
                                         parLutFilterNames.size),
@@ -1040,7 +1048,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                                        ('O3UNIT', 'f8'),
                                        ('QESYSUNIT', 'f8'),
                                        ('QESYSSLOPEUNIT', 'f8'),
-
                                        ('HASEXTERNALPWV', 'i2'),
                                        ('HASEXTERNALTAU', 'i2')])
         inParInfo['NCCD'] = parCat['nCcd']
@@ -1141,6 +1148,67 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         inSuperStar[:, :, :, :] = parCat['superstar'][0, :].reshape(inSuperStar.shape)
 
         return (inParInfo, inParams, inSuperStar)
+
+    def _persistFgcmDatasets(self, butler, fgcmFitCycle):
+        """
+        Persist FGCM datasets through the butler.
+
+        Parameters
+        ----------
+        butler: `lsst.daf.persistence.Butler`
+        fgcmFitCycle: `lsst.fgcm.FgcmFitCycle`
+           Fgcm Fit cycle object
+        """
+
+        # Save the parameters
+        parInfo, pars = fgcmFitCycle.fgcmPars.parsToArrays()
+
+        parSchema = afwTable.Schema()
+
+        comma = ','
+        lutFilterNameString = comma.join([n.decode('utf-8')
+                                          for n in parInfo['LUTFILTERNAMES'][0]])
+        fitBandString = comma.join([n.decode('utf-8')
+                                    for n in parInfo['FITBANDS'][0]])
+        notFitBandString = comma.join([n.decode('utf-8')
+                                       for n in parInfo['NOTFITBANDS'][0]])
+
+        parSchema = self._makeParSchema(parInfo, pars, fgcmFitCycle.fgcmPars.parSuperStarFlat,
+                                        lutFilterNameString, fitBandString, notFitBandString)
+        parCat = self._makeParCatalog(parSchema, parInfo, pars,
+                                      fgcmFitCycle.fgcmPars.parSuperStarFlat,
+                                      lutFilterNameString, fitBandString, notFitBandString)
+
+        butler.put(parCat, 'fgcmFitParameters', fgcmcycle=self.config.cycleNumber)
+
+        # Save the indices of the flagged stars
+        # (stars that have been (a) reserved from the fit for testing and
+        # (b) bad stars that have failed quality checks.)
+        flagStarSchema = self._makeFlagStarSchema()
+        flagStarStruct = fgcmFitCycle.fgcmStars.getFlagStarIndices()
+        flagStarCat = self._makeFlagStarCat(flagStarSchema, flagStarStruct)
+
+        butler.put(flagStarCat, 'fgcmFlaggedStars', fgcmcycle=self.config.cycleNumber)
+
+        # Save the zeropoint information
+        zptSchema = self._makeZptSchema(fgcmFitCycle.fgcmZpts.zpStruct['FGCM_FZPT_CHEB'].shape[1])
+        zptCat = self._makeZptCat(zptSchema, fgcmFitCycle.fgcmZpts.zpStruct)
+
+        butler.put(zptCat, 'fgcmZeropoints', fgcmcycle=self.config.cycleNumber)
+
+        # Save atmosphere values
+        atmSchema = self._makeAtmSchema()
+        atmCat = self._makeAtmCat(atmSchema, fgcmFitCycle.fgcmZpts.atmStruct)
+
+        butler.put(atmCat, 'fgcmAtmosphereParameters', fgcmcycle=self.config.cycleNumber)
+
+        # Save the standard stars (if configured)
+        if self.config.outputStandards:
+            stdSchema = self._makeStdSchema()
+            stdStruct = fgcmFitCycle.fgcmStars.retrieveStdStarCatalog(fgcmFitCycle.fgcmPars)
+            stdCat = self._makeStdCat(stdSchema, stdStruct)
+
+            butler.put(stdCat, 'fgcmStandardStars', fgcmcycle=self.config.cycleNumber)
 
     def _makeParSchema(self, parInfo, pars, parSuperStarFlat,
                        lutFilterNameString, fitBandString, notFitBandString):
@@ -1259,28 +1327,37 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
         return parSchema
 
-    def _fillParCatalog(self, parCat, parInfo, pars,
-                        parSuperStarFlat, lutFilterNameString, fitBandString,
-                        notFitBandString):
+    def _makeParCatalog(self, parSchema, parInfo, pars, parSuperStarFlat,
+                        lutFilterNameString, fitBandString, notFitBandString):
         """
-        Fill the parameter catalog
+        Make the FGCM parameter catalog for persistence
 
         Parameters
         ----------
-        parCat: `afwTable.BasicCatalog`
-           Parameter catalog for persistence
+        parSchema: `afwTable.schema`
+           Parameter catalog schema
         pars: `np.ndarray`
-           FGCM parameter output
+           FGCM parameters to put into parCat
         parSuperStarFlat: `np.array`
-           FGCM superstar flat array
+           FGCM superstar flat array to put into parCat
         lutFilterNameString: `str`
            Combined string of all the lutFilterNames
         fitBandString: `str`
            Combined string of all the fitBands
         notFitBandString: `str`
            Combined string of all the bands not used in the fit
+
+        Returns
+        -------
+        parCat: `afwTable.BasicCatalog`
+           Atmosphere and instrumental model parameter catalog for persistence
         """
 
+        parCat = afwTable.BaseCatalog(parSchema)
+        parCat.reserve(1)
+
+        # The parameter catalog just has one row, with many columns for all the
+        # atmosphere and instrument fit parameters
         rec = parCat.addNew()
 
         # info section
@@ -1325,13 +1402,11 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         rec['superstarSize'][:] = parSuperStarFlat.shape
         rec['superstar'][:] = parSuperStarFlat.flatten()
 
+        return parCat
+
     def _makeFlagStarSchema(self):
         """
         Make the flagged-stars schema
-
-        Parameters
-        ----------
-        None
 
         Returns
         -------
@@ -1347,7 +1422,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
     def _makeFlagStarCat(self, flagStarSchema, flagStarStruct):
         """
-        Make the flagged star catalog
+        Make the flagged star catalog for persistence
 
         Parameters
         ----------
@@ -1366,9 +1441,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         flagStarCat.reserve(flagStarStruct.size)
         for i in range(flagStarStruct.size):
             flagStarCat.addNew()
-
-        if not flagStarCat.isContiguous():
-            flagStarCat = flagStarCat.copy(deep=True)
 
         flagStarCat['objId'][:] = flagStarStruct['OBJID']
         flagStarCat['objFlag'][:] = flagStarStruct['OBJFLAG']
@@ -1433,7 +1505,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
     def _makeZptCat(self, zptSchema, zpStruct):
         """
-        Make the zeropoint catalog
+        Make the zeropoint catalog for persistence
 
         Parameters
         ----------
@@ -1454,9 +1526,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         for filterName in zpStruct['FILTERNAME']:
             rec = zptCat.addNew()
             rec['filtername'] = filterName.decode('utf-8')
-
-        if not zptCat.isContiguous():
-            zptCat = zptCat.copy(deep=True)
 
         zptCat['visit'][:] = zpStruct['VISIT']
         zptCat['ccd'][:] = zpStruct['CCD']
@@ -1505,7 +1574,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
     def _makeAtmCat(self, atmSchema, atmStruct):
         """
-        Make the atmosphere catalog
+        Make the atmosphere catalog for persistence
 
         Parameters
         ----------
@@ -1524,9 +1593,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         atmCat.reserve(atmStruct.size)
         for i in range(atmStruct.size):
             atmCat.addNew()
-
-        if not atmCat.isContiguous():
-            atmCat = atmCat.copy(deep=True)
 
         atmCat['visit'][:] = atmStruct['VISIT']
         atmCat['pmb'][:] = atmStruct['PMB']
@@ -1561,7 +1627,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
 
     def _makeStdCat(self, stdSchema, stdStruct):
         """
-        Make the standard star catalog
+        Make the standard star catalog for persistence
 
         Parameters
         ----------
@@ -1581,10 +1647,6 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         stdCat.reserve(stdStruct.size)
         for i in range(stdStruct.size):
             stdCat.addNew()
-
-        # Sometimes the reserve doesn't actually make a contiguous catalog (sigh)
-        if not stdCat.isContiguous():
-            stdCat = stdCat.copy(deep=True)
 
         stdCat['id'][:] = stdStruct['FGCM_ID']
         stdCat['coord_ra'][:] = stdStruct['RA'] * lsst.geom.degrees

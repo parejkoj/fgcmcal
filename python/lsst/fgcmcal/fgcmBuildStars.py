@@ -37,7 +37,7 @@ from lsst.meas.algorithms.sourceSelector import sourceSelectorRegistry
 
 import fgcm
 
-__all__ = ['FgcmBuildStarsConfig', 'FgcmBuildStarsTask']
+__all__ = ['FgcmBuildStarsConfig', 'FgcmBuildStarsTask', 'FgcmBuildStarsRunner']
 
 
 class FgcmBuildStarsConfig(pexConfig.Config):

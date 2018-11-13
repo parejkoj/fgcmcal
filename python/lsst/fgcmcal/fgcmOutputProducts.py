@@ -44,7 +44,7 @@ from lsst.meas.algorithms import DatasetConfig
 
 import fgcm
 
-__all__ = ['FgcmOutputProductsConfig', 'FgcmOutputProductsTask']
+__all__ = ['FgcmOutputProductsConfig', 'FgcmOutputProductsTask', 'FgcmOutputProductsRunner']
 
 
 class FgcmOutputProductsConfig(pexConfig.Config):
