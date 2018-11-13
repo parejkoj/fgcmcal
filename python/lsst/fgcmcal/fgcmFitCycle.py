@@ -280,11 +280,6 @@ class FgcmFitCycleConfig(pexConfig.Config):
         dtype=int,
         default=256,
     )
-    cameraGain = pexConfig.Field(
-        doc="Gain value for the typical CCD",
-        dtype=float,
-        default=None,
-    )
     outfileBase = pexConfig.Field(
         doc="Filename start for plot output files",
         dtype=str,
@@ -930,6 +925,10 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
         # Mirror area in cm**2
         mirrorArea = np.pi*(camera.telescopeDiameter*100./2.)**2.
 
+        # Get approximate average camera gain:
+        gains = [amp.getGain() for detector in camera for amp in detector.getAmpInfoCatalog()]
+        cameraGain = float(np.median(gains))
+
         # create a configuration dictionary for fgcmFitCycle
         configDict = {'outfileBase': self.config.outfileBase,
                       'logger': self.log,
@@ -938,7 +937,7 @@ class FgcmFitCycleTask(pipeBase.CmdLineTask):
                       'indexFile': None,
                       'lutFile': None,
                       'mirrorArea': mirrorArea,
-                      'cameraGain': self.config.cameraGain,
+                      'cameraGain': cameraGain,
                       'ccdStartIndex': camera[0].getId(),
                       'expField': 'VISIT',
                       'ccdField': 'CCD',

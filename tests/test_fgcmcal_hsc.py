@@ -111,7 +111,6 @@ class FgcmcalTestHSC(fgcmcalTestBase.FgcmcalTestBase, lsst.utils.tests.TestCase)
         self.config.washMjds = (0.0, )
         self.config.epochMjds = (0.0, 100000.0)
         self.config.latitude = 19.8256
-        self.config.cameraGain = 3.0
         self.config.pixelScale = 0.17
         self.config.expGrayPhotometricCut = (-0.05, -0.05)
         self.config.expGrayHighCut = (0.2, 0.2)
@@ -165,7 +164,7 @@ class FgcmcalTestHSC(fgcmcalTestBase.FgcmcalTestBase, lsst.utils.tests.TestCase)
         self.config.refObjLoader.retarget(target=LoadAstrometryNetObjectsTask)
 
         filterMapping = {'r': 'HSC-R', 'i': 'HSC-I'}
-        zpOffsets = np.array([8.685752, 8.971653])
+        zpOffsets = np.array([8.877202988, 9.163103988])
 
         self._runFgcmOutputProducts(visitDataRefName, ccdDataRefName,
                                     filterMapping, zpOffsets,
